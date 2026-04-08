@@ -1,4 +1,4 @@
-# vtcode-share-hf AGENTS.md
+# AGENTS.md
 
 Development and deployment guide for vtcode-share-hf.
 
