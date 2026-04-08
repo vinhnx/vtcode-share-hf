@@ -13,7 +13,7 @@
     "check": "tsc --noEmit && eslint src --ext .ts",
     "lint": "eslint src --ext .ts",
     "test": "bun test",
-    "viewer": "node dist/atif-viewer.js"
+    "viewer": "vtcode-share-hf viewer"
   },
   "keywords": ["vtcode", "huggingface", "agent-traces", "pii-redaction"],
   "author": "",

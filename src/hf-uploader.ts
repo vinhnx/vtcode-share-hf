@@ -110,7 +110,7 @@ modality:
 
 # VTCode Session Traces
 
-This dataset contains redacted coding agent session traces collected using vtcode-share-hf. Sessions are exported from a local VTCode workspace and filtered to keep only sessions that passed deterministic redaction and LLM review.
+This dataset contains redacted coding agent session traces collected using [vtcode-share-hf](https://github.com/vinhnx/vtcode-share-hf). Sessions are exported from a local VTCode workspace and filtered to keep only sessions that passed deterministic redaction and LLM review.
 
 ## Data Description
 
@@ -139,6 +139,10 @@ vtcode-share-hf viewer
 from datasets import load_dataset
 ds = load_dataset("${fullRepo}")
 \`\`\`
+
+## Source Code
+
+- **Repository**: https://github.com/vinhnx/vtcode-share-hf
 
 ## License
 
