@@ -12,15 +12,15 @@ export class HFUploader {
   }
 
   /**
-   * Verify huggingface-cli is installed
+   * Verify hf CLI is installed
    */
   checkDependencies(): boolean {
     try {
-      execSync("huggingface-cli --version", { stdio: "pipe" });
+      execSync("hf auth whoami", { stdio: "pipe" });
       return true;
     } catch {
       console.error(
-        "[ERROR] huggingface-cli not found. Install with: pip install huggingface_hub[cli]"
+        "[ERROR] hf CLI not found. Install with: pip install huggingface_hub[cli]"
       );
       return false;
     }
@@ -32,7 +32,7 @@ export class HFUploader {
   ensureRepo(): boolean {
     try {
       // Check if repo exists
-      execSync(`huggingface-cli repo-info ${this.repo} --repo-type dataset`, {
+      execSync(`hf repo info ${this.repo} --repo-type dataset`, {
         stdio: "pipe",
       });
       console.log(`[OK] Dataset repo ${this.repo} exists`);
@@ -41,7 +41,7 @@ export class HFUploader {
       console.log(`Creating dataset repo ${this.repo}...`);
       try {
         execSync(
-          `huggingface-cli repo create ${this.repo} --repo-type dataset --private`,
+          `hf repo create ${this.repo} --repo-type dataset --private`,
           { stdio: "inherit" }
         );
         console.log(`[OK] Created dataset repo ${this.repo}`);
@@ -197,7 +197,7 @@ ds = load_dataset("${repoId}")
 
         try {
           execSync(
-            `huggingface-cli upload ${this.repo} ${filePath} ${file} --repo-type dataset`,
+            `hf upload ${this.repo} ${filePath} ${file} --repo-type dataset`,
             { stdio: "inherit" }
           );
           uploadedSessions.add(file);

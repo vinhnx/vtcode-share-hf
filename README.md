@@ -46,16 +46,16 @@ bun link
 
 ### External dependencies
 
-`collect` and `upload` need `huggingface-cli`:
+`collect` and `upload` need `hf` CLI:
 
 ```bash
 pip install "huggingface_hub[cli]"
-huggingface-cli login
+hf auth login
 ```
 
 When logging in:
 - Create a token at https://huggingface.co/settings/tokens with write scope
-- Say Y when asked to add the token as git credential
+- Choose storage method for credentials
 - Do not set `HF_TOKEN` as an environment variable
 
 ## Quick start

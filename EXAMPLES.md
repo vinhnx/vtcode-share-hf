@@ -9,7 +9,7 @@ bun link
 
 # Install HuggingFace CLI
 pip install "huggingface_hub[cli]"
-huggingface-cli login
+hf auth login
 ```
 
 ## Scenario 1: Share all vtcode sessions
@@ -311,10 +311,10 @@ Before uploading for real:
 bun link  # in the vtcode-share-hf directory
 ```
 
-### "huggingface-cli not found"
+### "hf CLI not found"
 ```bash
 pip install "huggingface_hub[cli]"
-huggingface-cli login
+hf auth login
 ```
 
 ### "Workspace not initialized"
@@ -328,4 +328,4 @@ Check that `~/.vtcode/sessions/` exists and contains `session-*.json` files.
 ### "Sessions not uploading"
 - Verify workspace.json exists: `.vtcode-hf/workspace.json`
 - Check git credentials: `git credential-osxkeychain` (macOS)
-- Verify HF token is configured: `huggingface-cli whoami`
+- Verify HF token is configured: `hf auth whoami`
