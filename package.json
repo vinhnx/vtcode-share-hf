@@ -1,0 +1,27 @@
+{
+  "name": "vtcode-share-hf",
+  "version": "1.0.0",
+  "description": "Collect, review, reject, and upload redacted vtcode session traces to Hugging Face",
+  "type": "module",
+  "bin": {
+    "vtcode-share-hf": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "check": "tsc --noEmit && eslint src --ext .ts",
+    "lint": "eslint src --ext .ts",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "keywords": ["vtcode", "huggingface", "agent-traces", "pii-redaction"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3"
+  }
+}
