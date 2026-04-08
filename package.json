@@ -12,7 +12,7 @@
     "dev": "tsc --watch",
     "check": "tsc --noEmit && eslint src --ext .ts",
     "lint": "eslint src --ext .ts",
-    "test": "node --test dist/**/*.test.js"
+    "test": "bun test"
   },
   "keywords": ["vtcode", "huggingface", "agent-traces", "pii-redaction"],
   "author": "",

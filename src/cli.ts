@@ -38,7 +38,7 @@ program
       );
       collector.saveWorkspaceConfig();
 
-      console.log(`✓ Initialized workspace at ${workspacePath}`);
+      console.log(`[OK] Initialized workspace at ${workspacePath}`);
       console.log(`  Repo: ${options.repo}`);
       if (options.organization) {
         console.log(`  Organization: ${options.organization}`);
@@ -71,13 +71,13 @@ program
       const workspacePath = resolve(options.cwd, options.workspace);
 
       if (!existsSync(workspacePath)) {
-        console.error(`❌ Workspace not initialized. Run 'vtcode-share-hf init' first.`);
+        console.error(`[ERROR] Workspace not initialized. Run 'vtcode-share-hf init' first.`);
         process.exit(1);
       }
 
       const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
       if (!config) {
-        console.error(`❌ Cannot read workspace config.`);
+        console.error(`[ERROR] Cannot read workspace config.`);
         process.exit(1);
       }
 
@@ -122,7 +122,7 @@ program
       // Find vtcode sessions
       const sessionsPath = join(process.env.HOME || "", ".vtcode/sessions");
       if (!existsSync(sessionsPath)) {
-        console.error(`❌ vtcode sessions not found at ${sessionsPath}`);
+        console.error(`[ERROR] vtcode sessions not found at ${sessionsPath}`);
         process.exit(1);
       }
 
@@ -138,15 +138,15 @@ program
         const result = collector.collectSession(filePath);
 
         if (result.success && result.metadata) {
-          console.log(`✓ ${file} (${result.metadata.redactions_count} redactions)`);
+          console.log(`[OK] ${file} (${result.metadata.redactions_count} redactions)`);
           collected++;
         } else {
-          console.error(`✗ ${file}: ${result.error}`);
+          console.error(`[FAIL] ${file}: ${result.error}`);
         }
       }
 
       collector.saveWorkspaceConfig();
-      console.log(`\n✅ Collected ${collected}/${files.length} sessions`);
+      console.log(`\n[DONE] Collected ${collected}/${files.length} sessions`);
     }
   );
 
@@ -164,13 +164,13 @@ program
       const workspacePath = resolve(options.cwd, options.workspace);
 
       if (!existsSync(workspacePath)) {
-        console.error(`❌ Workspace not found at ${workspacePath}`);
+        console.error(`[ERROR] Workspace not found at ${workspacePath}`);
         process.exit(1);
       }
 
       const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
       if (!config) {
-        console.error(`❌ Cannot read workspace config.`);
+        console.error(`[ERROR] Cannot read workspace config.`);
         process.exit(1);
       }
 

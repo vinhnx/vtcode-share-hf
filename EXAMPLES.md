@@ -4,8 +4,8 @@
 
 ```bash
 # Install dependencies
-npm install
-npm link
+bun install
+bun link
 
 # Install HuggingFace CLI
 pip install "huggingface_hub[cli]"
@@ -308,7 +308,7 @@ Before uploading for real:
 
 ### "vtcode-share-hf: command not found"
 ```bash
-npm link  # in the vtcode-share-hf directory
+bun link  # in the vtcode-share-hf directory
 ```
 
 ### "huggingface-cli not found"

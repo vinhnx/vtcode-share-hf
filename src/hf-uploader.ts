@@ -20,7 +20,7 @@ export class HFUploader {
       return true;
     } catch {
       console.error(
-        "❌ huggingface-cli not found. Install with: pip install huggingface_hub[cli]"
+        "[ERROR] huggingface-cli not found. Install with: pip install huggingface_hub[cli]"
       );
       return false;
     }
@@ -35,7 +35,7 @@ export class HFUploader {
       execSync(`huggingface-cli repo-info ${this.repo} --repo-type dataset`, {
         stdio: "pipe",
       });
-      console.log(`✓ Dataset repo ${this.repo} exists`);
+      console.log(`[OK] Dataset repo ${this.repo} exists`);
       return true;
     } catch {
       console.log(`Creating dataset repo ${this.repo}...`);
@@ -44,10 +44,10 @@ export class HFUploader {
           `huggingface-cli repo create ${this.repo} --repo-type dataset --private`,
           { stdio: "inherit" }
         );
-        console.log(`✓ Created dataset repo ${this.repo}`);
+        console.log(`[OK] Created dataset repo ${this.repo}`);
         return true;
       } catch (error) {
-        console.error(`❌ Failed to create repo: ${error}`);
+        console.error(`[ERROR] Failed to create repo: ${error}`);
         return false;
       }
     }
@@ -140,7 +140,7 @@ ds = load_dataset("${repoId}")
 
     const redactedDir = join(this.workspace, "redacted");
     if (!existsSync(redactedDir)) {
-      console.error(`❌ No redacted sessions directory: ${redactedDir}`);
+      console.error(`[ERROR] No redacted sessions directory: ${redactedDir}`);
       return { success: false, uploaded: 0, skipped: 0 };
     }
 
@@ -171,13 +171,13 @@ ds = load_dataset("${repoId}")
       console.log(`Found ${files.length} redacted sessions`);
 
       if (dryRun) {
-        console.log("\n📋 Dry run - would upload:");
+        console.log("\n[DRY-RUN] Would upload:");
         files.forEach((file) => {
           if (uploadedSessions.has(file)) {
-            console.log(`  ⊘ ${file} (already uploaded)`);
+            console.log(`  [SKIP] ${file} (already uploaded)`);
             skipped++;
           } else {
-            console.log(`  ✓ ${file}`);
+            console.log(`  [OK] ${file}`);
             uploaded++;
           }
         });
@@ -187,13 +187,13 @@ ds = load_dataset("${repoId}")
       // Real upload
       for (const file of files) {
         if (uploadedSessions.has(file)) {
-          console.log(`⊘ ${file} already uploaded`);
+          console.log(`[SKIP] ${file} already uploaded`);
           skipped++;
           continue;
         }
 
         const filePath = join(redactedDir, file);
-        console.log(`⬆ Uploading ${file}...`);
+        console.log(`[UPLOADING] ${file}...`);
 
         try {
           execSync(
@@ -203,17 +203,17 @@ ds = load_dataset("${repoId}")
           uploadedSessions.add(file);
           uploaded++;
         } catch (error) {
-          console.error(`  ❌ Failed: ${error}`);
+          console.error(`  [ERROR] Failed: ${error}`);
         }
       }
 
       // Update manifest
       this.updateManifest(uploadedSessions);
 
-      console.log(`\n✅ Upload complete: ${uploaded} uploaded, ${skipped} skipped`);
+      console.log(`\n[DONE] Upload complete: ${uploaded} uploaded, ${skipped} skipped`);
       return { success: true, uploaded, skipped };
     } catch (error) {
-      console.error(`❌ Upload failed: ${error}`);
+      console.error(`[ERROR] Upload failed: ${error}`);
       return { success: false, uploaded, skipped };
     }
   }

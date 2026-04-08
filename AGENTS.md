@@ -5,10 +5,10 @@ Development and deployment guide for vtcode-share-hf.
 ## Quick commands
 
 ```bash
-npm run build      # TypeScript compilation
-npm run dev        # Watch mode
-npm run check      # Type check + lint
-npm link           # Install CLI globally
+bun run build      # TypeScript compilation
+bun run dev        # Watch mode
+bun run check      # Type check + lint
+bun link           # Install CLI globally
 ```
 
 ## Architecture
@@ -21,9 +21,9 @@ npm link           # Install CLI globally
 ## Development workflow
 
 1. **Make changes** in src/
-2. **Build**: `npm run build`
+2. **Build**: `bun run build`
 3. **Test**: `vtcode-share-hf <command>`
-4. **Check**: `npm run check`
+4. **Check**: `bun run check`
 
 ## Testing redaction
 
@@ -93,11 +93,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: npm install
-      - run: npm run build
-      - run: npx vtcode-share-hf init --repo ${{ secrets.HF_REPO }}
-      - run: npx vtcode-share-hf collect --secret "${{ secrets.API_KEY }}"
-      - run: npx vtcode-share-hf upload
+      - uses: oven-sh/setup-bun@v1
+      - run: bun install
+      - run: bun run build
+      - run: bun vtcode-share-hf init --repo ${{ secrets.HF_REPO }}
+      - run: bun vtcode-share-hf collect --secret "${{ secrets.API_KEY }}"
+      - run: bun vtcode-share-hf upload
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
 ```

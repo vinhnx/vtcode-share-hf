@@ -40,8 +40,8 @@ If your vtcode sessions do not involve many custom secrets, the dataset is likel
 ## Install
 
 ```bash
-npm install
-npm link
+bun install
+bun link
 ```
 
 ### External dependencies
@@ -54,9 +54,9 @@ huggingface-cli login
 ```
 
 When logging in:
-- Create a token at https://huggingface.co/settings/tokens with **write** scope
-- Say **Y** when asked to add the token as git credential
-- Do **not** set `HF_TOKEN` as an environment variable
+- Create a token at https://huggingface.co/settings/tokens with write scope
+- Say Y when asked to add the token as git credential
+- Do not set `HF_TOKEN` as an environment variable
 
 ## Quick start
 
@@ -96,7 +96,7 @@ vtcode-share-hf reject session-vtcode-*.json
 # Dry run first
 vtcode-share-hf upload --dry-run
 
-# Real upload
+# Upload for real
 vtcode-share-hf upload
 ```
 
@@ -218,10 +218,10 @@ This allows discovery via [Hugging Face dataset search](https://huggingface.co/d
 ## Development
 
 ```bash
-npm run build      # TypeScript → JavaScript
-npm run dev        # watch mode
-npm run check      # type check + lint
-npm run test       # run tests
+bun run build      # TypeScript to JavaScript
+bun run dev        # watch mode
+bun run check      # type check + lint
+bun run test       # run tests
 ```
 
 ## License
