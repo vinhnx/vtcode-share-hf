@@ -1,191 +1,115 @@
 # vtcode-share-hf
 
-Collect, review, reject, and upload redacted VTCode session traces to a Hugging Face dataset.
+Collect, redact, and upload VTCode session traces to a Hugging Face dataset.
 
-Warning: Sharing coding agent sessions risks leaking secrets and PII. Read this README fully before use.
+> **Warning**: Sharing agent sessions risks leaking secrets and PII. Review redacted output before uploading.
 
-## Dataset
+**Dataset**: [vinhnx90/vtcode-sessions](https://huggingface.co/datasets/vinhnx90/vtcode-sessions)
 
-The collected sessions are available on Hugging Face: [vinhnx90/vtcode-sessions](https://huggingface.co/datasets/vinhnx90/vtcode-sessions)
+## Commands
 
-## What it does
-
-- `init`: create a workspace for vtcode session collection
-- `collect`: redact sessions from `~/.vtcode/sessions/`
-- `upload`: upload approved sessions to a Hugging Face dataset
-- `list`: view sessions in workspace
-- `viewer`: launch ATIF trajectory viewer web interface
-
-## What gets redacted
-
-Every string field in every JSON object is scanned:
-
-- literal secrets from `~/.zshrc`, `--env-file`, and `--secret`
-- common API key and token patterns: OpenAI, GitHub, AWS, generic `key=secret`
-- email addresses and standard auth patterns
-
-For maximum safety, pass known secrets explicitly with `--secret`.
-
-## What does NOT get redacted deterministically
-
-- Non-standard secrets: custom tokens, internal service credentials
-- Context-specific PII: names, references, sensitive project names
-- Embedded files: included in session transcripts
-
-## Limitations
-
-Redacting coding agent sessions with 100% precision is not solved. This tool:
-
-1. Targets OSS project sessions which typically contain little private data
-2. Uses deterministic redaction for known patterns (handles most cases)
-3. Requires manual review for sensitive projects (check redacted output)
-
-If your vtcode sessions do not involve many custom secrets, the dataset is likely safe after redaction.
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize workspace |
+| `collect` | Redact sessions from `~/.vtcode/sessions/` |
+| `scan` | Scan redacted sessions with [trufflehog](https://github.com/trufflesecurity/trufflehog) |
+| `upload` | Upload approved sessions to HF |
+| `list` | View sessions in workspace |
+| `reject` | Mark sessions to skip on upload |
+| `viewer` | Launch ATIF trajectory viewer |
 
 ## Install
 
 ```bash
-bun install
-bun link
+bun install && bun link
 ```
 
-### External dependencies
-
-`collect` and `upload` need `hf` CLI:
-
-Install `hf` CLI:
-On macOS and Linux:
+Requires [hf CLI](https://huggingface.co/docs/huggingface_hub/guides/cli#standalone-installer-recommended):
 
 ```bash
 curl -LsSf https://hf.co/cli/install.sh | bash
-```
-
-On Windows:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
-```
-
-https://huggingface.co/docs/huggingface_hub/guides/cli#standalone-installer-recommended
-
-```bash
 hf auth login
 ```
 
-When logging in:
-
-- Create a token at https://huggingface.co/settings/tokens with write scope
-- Choose storage method for credentials
-- Do not set `HF_TOKEN` as an environment variable
-
 ## Quick start
 
-### 1. Initialize workspace
-
 ```bash
+# 1. Initialize
 vtcode-share-hf init --repo myuser/vtcode-sessions
-```
 
-### 2. Collect and redact sessions
+# 2. Collect and redact
+vtcode-share-hf collect --secret ~/.secrets.txt --secret "my-token"
 
-```bash
-vtcode-share-hf collect \
-  --secret ~/.secrets.txt \
-  --secret "my-custom-token-xyz"
-```
+# 3. Scan with trufflehog (optional but recommended)
+vtcode-share-hf scan
 
-Secrets file format: one secret per line.
-
-### 3. Review redacted output
-
-```bash
+# 4. Review
 vtcode-share-hf list --uploadable
+
+# 5. Upload
+vtcode-share-hf upload --dry-run   # preview first
+vtcode-share-hf upload             # upload for real
 ```
 
-Inspect redacted sessions in `.vtcode-hf/redacted/` directory.
+## Redaction
 
-### 4. Reject sessions if needed
+**Built-in** (deterministic):
+- Literal secrets from `--secret`, `--env-file`, and `~/.zshrc`
+- API key patterns: OpenAI, GitHub, AWS, generic `key=secret`
+- Email addresses and auth patterns
+
+**Trufflehog** (enhanced, via `scan` command):
+- 800+ secret detectors with verification
+- Entropy-based detection
+- Auto re-redact discovered secrets with `--redact`
+- Auto-reject sessions with verified secrets with `--reject`
 
 ```bash
-vtcode-share-hf reject session-vtcode-*.json
+# Scan for remaining secrets
+vtcode-share-hf scan
+
+# Scan and re-redact
+vtcode-share-hf scan --redact
+
+# Scan and auto-reject sessions with verified secrets
+vtcode-share-hf scan --reject
+
+# Combined: collect + scan in one step
+vtcode-share-hf collect --scan --secret ~/.secrets.txt
 ```
 
-### 5. Upload to Hugging Face
+Install trufflehog:
 
 ```bash
-# Dry run first
-vtcode-share-hf upload --dry-run
-
-# Upload for real
-vtcode-share-hf upload
+brew install trufflehog
 ```
 
-## Usage Guide
+### What is NOT redacted
 
-### Exploring Trajectories
+- Non-standard secrets and custom tokens
+- Context-specific PII (names, project names)
+- Embedded files in transcripts
 
-For interactive exploration of uploaded trajectories, use the local ATIF viewer:
-
-```bash
-vtcode-share-hf viewer
-```
-
-This launches a web interface at http://localhost:3000 where you can:
-- Load trajectory JSON files
-- Navigate through agent steps
-- View tool calls and observations
-- Track metrics and performance
-
-### Programmatic Access
-
-Access the dataset programmatically:
-
-```python
-from datasets import load_dataset
-
-# Load the dataset
-ds = load_dataset("vinhnx90/vtcode-sessions")
-
-# Access individual trajectories
-trajectory = ds[0]
-
-# Explore the data structure
-print(trajectory.keys())
-# dict_keys(['metadata', 'started_at', 'ended_at', 'total_messages',
-#            'distinct_tools', 'transcript', 'messages', 'progress'])
-```
-
-### Direct Download
-
-Individual trajectory files can be downloaded from the [dataset files page](https://huggingface.co/datasets/vinhnx90/vtcode-sessions/tree/main).
+Always spot-check `.vtcode-hf/redacted/` before uploading.
 
 ## Workspace layout
 
 ```
 .vtcode-hf/
-  workspace.json          # config
-  manifest.jsonl          # uploaded sessions manifest
-  redacted/               # public, redacted sessions
-  reports/                # deterministic redaction findings
-  review/                 # (future) LLM review results
-  images/                 # (future) extracted images
-  reject.txt              # rejected session filenames
+├── workspace.json       # config
+├── manifest.jsonl       # upload manifest
+├── redacted/            # public, ready for upload
+├── reports/             # redaction logs + trufflehog reports
+└── reject.txt           # rejected session filenames
 ```
 
-## Commands
+## Command reference
 
 ### `init`
 
 ```bash
-vtcode-share-hf init [--cwd /path] --repo user/dataset [--workspace .vtcode-hf]
+vtcode-share-hf init --repo user/dataset [--organization name] [--workspace .vtcode-hf]
 ```
-
-Options:
-
-- `--cwd <dir>`: project directory (default: current directory)
-- `--repo <id>`: HF dataset repo (format: `user/dataset`)
-- `--organization <name>`: HF organization namespace
-- `--workspace <dir>`: workspace location (default: `.vtcode-hf`)
 
 ### `collect`
 
@@ -195,56 +119,45 @@ vtcode-share-hf collect \
   --secret "my-token" \
   --env-file ~/.zshrc \
   --session-dirs "~/.vtcode/sessions:~/other/sessions" \
-  [--force] [--workspace .vtcode-hf]
+  --scan \
+  [--force]
 ```
 
 Options:
+- `--secret <file|text>` — literal secret or file (repeatable)
+- `--env-file <path>` — extract secrets from env file
+- `--session-dirs <paths>` — colon-separated session directories
+- `--scan` — run trufflehog scan after collection
+- `--force` — reprocess all sessions
 
-- `--secret <file>|<text>`: literal secret or secret file (repeatable)
-- `--env-file <path>`: environment file to extract secrets from (default: `~/.zshrc`)
-- `--session-dirs <paths>`: colon-separated session directories (default: `~/.vtcode/sessions`)
-- `--force`: reprocess all sessions
-- `--workspace <dir>`: workspace location
+### `scan`
 
-Automatically:
+```bash
+vtcode-share-hf scan [--only-verified] [--redact] [--reject]
+```
 
-- Reads from all specified session directories
-- Extracts secrets from `~/.zshrc` export statements
-- Applies deterministic redaction patterns
-- Saves redacted sessions to workspace
-- Supports multiple vtcode projects at once
+Options:
+- `--only-verified` — only show verified secrets
+- `--redact` — re-redact sessions with discovered secrets
+- `--reject` — auto-reject sessions containing verified secrets
 
 ### `upload`
 
 ```bash
-vtcode-share-hf upload [--dry-run] [--workspace .vtcode-hf]
+vtcode-share-hf upload [--dry-run]
 ```
-
-Options:
-
-- `--dry-run`: show what would be uploaded without doing it
-- `--workspace <dir>`: workspace location
-
-Only uploads sessions that pass redaction checks.
 
 ### `list`
 
 ```bash
-vtcode-share-hf list [--uploadable] [--workspace .vtcode-hf]
+vtcode-share-hf list [--uploadable]
 ```
-
-Options:
-
-- `--uploadable`: show only uploadable sessions
-- `--workspace <dir>`: workspace location
 
 ### `reject`
 
 ```bash
-vtcode-share-hf reject [--workspace .vtcode-hf] <session.json | image.png>
+vtcode-share-hf reject <session.json>
 ```
-
-Adds session to `reject.txt`. Upload will skip rejected sessions.
 
 ### `viewer`
 
@@ -252,64 +165,30 @@ Adds session to `reject.txt`. Upload will skip rejected sessions.
 vtcode-share-hf viewer [--port 3000]
 ```
 
-Launch a web-based ATIF trajectory viewer at http://localhost:3000. The viewer provides an interactive interface for exploring ATIF-compliant trajectory files with features like:
-
-- Step-by-step navigation through agent trajectories
-- Tool call visualization
-- Observation display
-- Metrics tracking
-- Raw JSON inspection
-
 ## Verifying results
 
-After `collect`, spot-check the redacted output:
-
 ```bash
-# List uploadable sessions
 vtcode-share-hf list --uploadable
-
-# Search redacted sessions for sensitive keywords
-grep -r "my-private-project" .vtcode-hf/redacted/
-grep -ri "password|token|secret" .vtcode-hf/redacted/ | head -20
+grep -r "sensitive-keyword" .vtcode-hf/redacted/
+vtcode-share-hf scan
 ```
 
-If you find private content still present, add the keyword/secret to your secrets list and rerun `collect --force`.
+## Safety checklist
 
-## Dataset card
+Before uploading:
 
-Generated Hugging Face dataset cards include tags:
-
-- `agent-traces`
-- `coding-agent`
-- `vtcode-share-hf`
-
-This allows discovery via [Hugging Face dataset search](https://huggingface.co/datasets?other=agent-traces).
-
-Note: The HuggingFace dataset viewer is disabled for this dataset due to complex nested trajectory structures. For interactive exploration of VTCode trajectories, use the local ATIF viewer:
-
-```bash
-vtcode-share-hf viewer
-```
-
-## Safety considerations
-
-1. Deterministic redaction catches most cases but is not 100% reliable
-2. Manual review recommended for projects involving:
-    - Financial data
-    - Personal credentials
-    - Proprietary code or protocols
-    - Customer or partner information
-3. Keep your secrets file secure – it contains sensitive values
-4. Use the `reject` command for any sessions you're unsure about
-5. Check `reports/` directory for detailed redaction findings
+- [ ] Review `reports/` for redaction findings
+- [ ] Spot-check `redacted/` for private content
+- [ ] Run `vtcode-share-hf scan` for trufflehog findings
+- [ ] Use `--dry-run` before real upload
+- [ ] Verify rejected session list
 
 ## Development
 
 ```bash
-bun run build      # TypeScript to JavaScript
+bun run build      # compile TypeScript
 bun run dev        # watch mode
 bun run check      # type check + lint
-bun run test       # run tests
 ```
 
 ## License
@@ -318,8 +197,7 @@ MIT
 
 ## See also
 
-- [pi-share-hf](https://github.com/badlogic/pi-share-hf) - similar tool for pi coding agent
-- [VTCode](https://github.com/vinhnx/VTCode) - the coding agent this tool works with
-- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) - Agent Trajectory Interchange Format specification
-- [HuggingFace Documentation](https://huggingface.co/docs) - Official HuggingFace documentation
-- [trufflehog](https://github.com/trufflesecurity/trufflehog) - advanced secret detection (future integration)
+- [VTCode](https://github.com/vinhnx/VTCode) — the coding agent
+- [trufflehog](https://github.com/trufflesecurity/trufflehog) — secret scanning
+- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) — agent trajectory format
+- [pi-share-hf](https://github.com/badlogic/pi-share-hf) — original tool for pi agent

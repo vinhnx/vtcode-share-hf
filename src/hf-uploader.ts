@@ -1,77 +1,83 @@
 import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
-import { join, basename } from "path";
+import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, statSync } from "fs";
+import { join } from "path";
+
+interface UploadedEntry {
+  filename: string;
+  uploaded_at: string;
+  size_bytes: number;
+}
+
+export interface UploadResult {
+  success: boolean;
+  uploaded: number;
+  skipped: number;
+  failed: string[];
+}
 
 export class HFUploader {
   private repo: string;
   private workspace: string;
+  private org?: string;
 
-  constructor(repo: string, workspace: string) {
+  constructor(repo: string, workspace: string, organization?: string) {
     this.repo = repo;
     this.workspace = workspace;
+    this.org = organization;
   }
 
-  /**
-   * Verify hf CLI is installed
-   */
   checkDependencies(): boolean {
     try {
       execSync("hf auth whoami", { stdio: "pipe" });
       return true;
     } catch {
-      console.error(
-        "[ERROR] hf CLI not found. Install with: pip install huggingface_hub[cli]"
-      );
+      console.error("[ERROR] hf CLI not found. Install with: pip install huggingface_hub[cli]");
       return false;
     }
   }
 
-  /**
-   * Create or update HF dataset repo
-   */
   ensureRepo(): boolean {
+    const fullRepo = this.org ? `${this.org}/${this.repo}` : this.repo;
+
     try {
-      // Check if repo exists
-      execSync(`hf repos info ${this.repo} --type dataset`, {
-        stdio: "pipe",
-      });
-      console.log(`[OK] Dataset repo ${this.repo} exists`);
+      execSync(`hf repos info ${fullRepo} --type dataset`, { stdio: "pipe" });
+      console.log(`[OK] Dataset repo ${fullRepo} exists`);
       return true;
     } catch {
-      console.log(`Creating dataset repo ${this.repo}...`);
+      console.log(`Creating dataset repo ${fullRepo}...`);
       try {
-        execSync(
-          `hf repos create ${this.repo} --type dataset --private`,
-          { stdio: "pipe" }
-        );
-        console.log(`[OK] Created dataset repo ${this.repo}`);
+        execSync(`hf repos create ${fullRepo} --type dataset`, { stdio: "pipe" });
+        console.log(`[OK] Created dataset repo ${fullRepo}`);
         return true;
-      } catch (error: any) {
-        // Check if it's a 409 conflict (repo already exists)
-        if (error.message && error.message.includes('409')) {
-          console.log(`[OK] Dataset repo ${this.repo} already exists`);
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const errStatus = (error as { status?: number }).status;
+        // 409 = already exists (race condition with concurrent creation)
+        if (errStatus === 409 || (errMsg && errMsg.includes("409"))) {
+          console.log(`[OK] Dataset repo ${fullRepo} already exists`);
           return true;
         }
-        // Check if already exists (fallback)
+        // Fallback: check if it exists as a regular repo
         try {
-          execSync(`hf repos info ${this.repo} --type dataset`, {
-            stdio: "pipe",
-          });
-          console.log(`[OK] Dataset repo ${this.repo} exists`);
+          execSync(`hf repos info ${fullRepo}`, { stdio: "pipe" });
+          console.log(`[OK] Dataset repo ${fullRepo} exists`);
           return true;
         } catch {
-          console.error(`[ERROR] Failed to create repo: ${error}`);
+          console.error(`[ERROR] Failed to create repo: ${error instanceof Error ? error.message : String(error)}`);
           return false;
         }
       }
     }
   }
 
-  /**
-   * Generate dataset card
-   */
-  generateDatasetCard(organizationOrUser?: string): string {
-    const repoId = organizationOrUser ? `${organizationOrUser}/${this.repo}` : this.repo;
+  generateDatasetCard(): string {
+    const fullRepo = this.org ? `${this.org}/${this.repo}` : this.repo;
+    const sessions = this.getRedactedSessions();
+    const totalSize = sessions.reduce((acc, f) => {
+      const stats = statSync(join(this.workspace, "redacted", f));
+      return acc + stats.size;
+    }, 0);
+
     return `---
 viewer: false
 dataset_info:
@@ -79,10 +85,10 @@ dataset_info:
   config_name: default
   splits:
   - name: train
-    num_bytes: 0
-    num_examples: 0
-  download_size: 0
-  dataset_size: 0
+    num_bytes: ${totalSize}
+    num_examples: ${sessions.length}
+  download_size: ${totalSize}
+  dataset_size: ${totalSize}
 license: mit
 task_categories:
 - text-generation
@@ -92,7 +98,7 @@ tags:
 - coding-agent
 - vtcode-share-hf
 - redacted
-pretty_name: vtcode Session Traces
+pretty_name: VTCode Session Traces
 size_categories:
 - n<1K
 language:
@@ -102,227 +108,258 @@ modality:
 - text
 ---
 
-# Coding agent session traces for VTCode
+# VTCode Session Traces
 
-This dataset contains redacted coding agent session traces collected while working on various projects. The traces were exported with vtcode-share-hf from a local VTCode workspace and filtered to keep only sessions that passed deterministic redaction and LLM review.
+This dataset contains redacted coding agent session traces collected using vtcode-share-hf. Sessions are exported from a local VTCode workspace and filtered to keep only sessions that passed deterministic redaction and LLM review.
 
-## Data description
+## Data Description
 
-Each \`*.json\` file is a redacted VTCode session. Sessions are stored as JSON files containing structured session data including conversation transcripts, tool calls, model responses, and metadata.
+Each \`*.json\` or \`*.jsonl\` file is a redacted VTCode session. Sessions follow the [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) for standardized agent trajectory interchange.
 
-VTCode session files contain complete coding sessions with user interactions, assistant responses, tool executions, and session metadata. See the upstream session format documentation for the exact schema.
+## Redaction
 
-Source tool: [https://github.com/vinhnx/VTCode](https://github.com/vinhnx/VTCode)
+The data was processed with deterministic secret redaction. Known secrets are replaced with \`[REDACTED_*]\` placeholders. An additional scan with TruffleHog catches any remaining secrets.
 
-## Session Format
+## Stats
 
-VTCode sessions follow the [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) for standardized agent trajectory interchange.
-
-## Redaction and review
-
-The data was processed with vtcode-share-hf using deterministic secret redaction plus an LLM review step. Deterministic redaction targets exact known secrets and curated credential patterns. The LLM review decides whether a session is fit to share publicly and whether any sensitive content appears to have been missed.
+- **Sessions**: ${sessions.length}
+- **Total size**: ${(totalSize / 1024).toFixed(1)} KB
 
 ## Limitations
 
-This dataset is best-effort redacted. Coding agent transcripts can still contain sensitive or off-topic content, especially if a session mixed work with unrelated private tasks. Use with appropriate caution.
+This dataset is best-effort redacted. Use with appropriate caution.
 
-## Agent Trace Viewer
-
-This dataset contains complex nested trajectory data that is best explored using the dedicated ATIF viewer:
+## Usage
 
 \`\`\`bash
-# Install vtcode-share-hf and run the viewer
+# View trajectories locally
 vtcode-share-hf viewer
-\`\`\`
 
-Then open http://localhost:3000 in your browser to load and explore trajectory files with full interactive features including step navigation, tool call visualization, and metrics tracking.
-
-For programmatic access, use the datasets library:
-
-\`\`\`python
+# Load programmatically
 from datasets import load_dataset
-ds = load_dataset("vinhnx90/vtcode-sessions")
+ds = load_dataset("${fullRepo}")
 \`\`\`
 
 ## License
 
-This dataset is released under the [MIT License](https://opensource.org/licenses/MIT).
+MIT License
 `;
   }
 
-  /**
-   * Upload sessions to HF
-   */
-  upload(dryRun: boolean = false): {
-    success: boolean;
-    uploaded: number;
-    skipped: number;
-  } {
+  upload(dryRun: boolean = false): UploadResult {
     if (!this.checkDependencies()) {
-      return { success: false, uploaded: 0, skipped: 0 };
+      return { success: false, uploaded: 0, skipped: 0, failed: [] };
     }
 
     const redactedDir = join(this.workspace, "redacted");
     if (!existsSync(redactedDir)) {
-      console.error(`[ERROR] No redacted sessions directory: ${redactedDir}`);
-      return { success: false, uploaded: 0, skipped: 0 };
+      console.error(`[ERROR] No redacted sessions: ${redactedDir}`);
+      return { success: false, uploaded: 0, skipped: 0, failed: [] };
     }
 
-    // Read manifest if exists
-    const manifestPath = join(this.workspace, "manifest.jsonl");
-    const uploadedSessions = new Set<string>();
+    const uploadedSet = this.loadManifest();
+    const rejected = this.loadRejected();
+    const files = this.getRedactedSessions().filter((f) => !rejected.has(f));
 
-    if (existsSync(manifestPath)) {
-      try {
-        const lines = readFileSync(manifestPath, "utf-8").split("\n");
-        for (const line of lines) {
-          if (line.trim()) {
-            const entry = JSON.parse(line);
-            uploadedSessions.add(entry.file);
-          }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    }
+    console.log(`Found ${files.length} redacted sessions (${rejected.size} rejected, excluded)`);
 
-    // Collect sessions to upload
     let uploaded = 0;
     let skipped = 0;
+    const failed: string[] = [];
+    const toUpload: string[] = [];
 
-    try {
-      const files = this.getRedactedSessions();
-      console.log(`Found ${files.length} redacted sessions`);
-
-      if (dryRun) {
-        console.log("\n[DRY-RUN] Would upload:");
-        files.forEach((file) => {
-          if (uploadedSessions.has(file)) {
-            console.log(`  [SKIP] ${file} (already uploaded)`);
-            skipped++;
-          } else {
-            console.log(`  [OK] ${file}`);
-            uploaded++;
-          }
-        });
-        return { success: true, uploaded, skipped };
+    for (const file of files) {
+      if (uploadedSet.has(file)) {
+        console.log(`[SKIP] ${file} (already uploaded)`);
+        skipped++;
+      } else {
+        toUpload.push(file);
       }
-
-      // Real upload
-      for (const file of files) {
-        if (uploadedSessions.has(file)) {
-          console.log(`[SKIP] ${file} already uploaded`);
-          skipped++;
-          continue;
-        }
-
-        const filePath = join(redactedDir, file);
-        console.log(`[UPLOADING] ${file}...`);
-
-        try {
-          execSync(
-            `hf upload ${this.repo} ${filePath} ${file} --repo-type dataset`,
-            { stdio: "inherit" }
-          );
-          uploadedSessions.add(file);
-          uploaded++;
-        } catch (error) {
-          console.error(`  [ERROR] Failed: ${error}`);
-        }
-      }
-
-      // Update manifest
-      this.updateManifest(uploadedSessions);
-
-      console.log(`\n[DONE] Upload complete: ${uploaded} uploaded, ${skipped} skipped`);
-      return { success: true, uploaded, skipped };
-    } catch (error) {
-      console.error(`[ERROR] Upload failed: ${error}`);
-      return { success: false, uploaded, skipped };
     }
+
+    if (toUpload.length === 0) {
+      console.log("[DONE] All sessions already uploaded.");
+      return { success: true, uploaded: 0, skipped, failed };
+    }
+
+    if (dryRun) {
+      console.log("\n[DRY-RUN] Would upload:");
+      for (const file of toUpload) {
+        console.log(`  [OK] ${file}`);
+      }
+      return { success: true, uploaded: toUpload.length, skipped, failed };
+    }
+
+    // Upload dataset card first
+    this.uploadDatasetCard();
+
+    // Upload sessions
+    for (const file of toUpload) {
+      const filePath = join(redactedDir, file);
+      console.log(`[UPLOADING] ${file}...`);
+
+      try {
+        execSync(`hf upload ${this.repo} ${filePath} ${file} --repo-type dataset`, {
+          stdio: "inherit",
+          timeout: 120_000,
+        });
+        uploadedSet.add(file);
+        uploaded++;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`  [ERROR] ${file}: ${msg}`);
+        failed.push(file);
+      }
+    }
+
+    // Also upload images if present
+    this.uploadImages();
+
+    // Save updated manifest
+    this.saveManifest(uploadedSet);
+
+    console.log(`\n[DONE] ${uploaded} uploaded, ${skipped} skipped, ${failed.length} failed`);
+    return { success: failed.length === 0, uploaded, skipped, failed };
   }
 
-  /**
-   * Get list of redacted sessions
-   */
   private getRedactedSessions(): string[] {
     const redactedDir = join(this.workspace, "redacted");
     if (!existsSync(redactedDir)) {
       return [];
     }
-
-    try {
-      const files = execSync(`find ${redactedDir} -name "*.json" -o -name "*.jsonl"`, {
-        encoding: "utf-8",
-      });
-      return files
-        .split("\n")
-        .filter((f) => f.trim())
-        .map((f) => basename(f));
-    } catch {
-      return [];
-    }
+    return readdirSync(redactedDir)
+      .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
+      .sort();
   }
 
   /**
-   * Upload dataset card (README.md)
+   * Load manifest from file. Returns set of uploaded filenames.
    */
-  uploadDatasetCard(organizationOrUser?: string): boolean {
+  private loadManifest(): Set<string> {
+    const manifestPath = join(this.workspace, "manifest.local.jsonl");
+    const sessions = new Set<string>();
+
+    if (!existsSync(manifestPath)) {
+      return sessions;
+    }
+
     try {
-      const cardContent = this.generateDatasetCard(organizationOrUser);
-      const tempCardPath = join(this.workspace, "README.md");
-      writeFileSync(tempCardPath, cardContent);
+      const lines = readFileSync(manifestPath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed) as UploadedEntry | { filename: string };
+          sessions.add(entry.filename);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    } catch {
+      // File unreadable — start fresh
+    }
+    return sessions;
+  }
 
-      console.log(`[UPLOADING] Dataset card...`);
-      execSync(
-        `hf upload ${this.repo} ${tempCardPath} README.md --repo-type dataset`,
-        { stdio: "inherit" }
-      );
+  /**
+   * Save manifest atomically. Rebuilds the entire manifest from the set of filenames.
+   */
+  private saveManifest(sessions: Set<string>) {
+    const manifestPath = join(this.workspace, "manifest.local.jsonl");
+    const entries: UploadedEntry[] = [];
 
+    for (const file of sessions) {
+      const filePath = join(this.workspace, "redacted", file);
+      const sizeBytes = existsSync(filePath) ? statSync(filePath).size : 0;
+      entries.push({ filename: file, uploaded_at: new Date().toISOString(), size_bytes: sizeBytes });
+    }
+
+    const tmpPath = `${manifestPath}.tmp`;
+    const content = entries.map((e) => JSON.stringify(e)).join("\n");
+    writeFileSync(tmpPath, content + "\n", "utf-8");
+    renameSync(tmpPath, manifestPath);
+  }
+
+  private loadRejected(): Set<string> {
+    const rejectPath = join(this.workspace, "reject.txt");
+    if (!existsSync(rejectPath)) return new Set();
+    return new Set(
+      readFileSync(rejectPath, "utf-8")
+        .split("\n")
+        .filter((l) => l.trim())
+    );
+  }
+
+  uploadDatasetCard(): boolean {
+    try {
+      const cardContent = this.generateDatasetCard();
+      const tempPath = join(this.workspace, "README.md");
+      writeFileSync(tempPath, cardContent, "utf-8");
+
+      console.log("[UPLOADING] Dataset card...");
+      execSync(`hf upload ${this.repo} ${tempPath} README.md --repo-type dataset`, { stdio: "pipe" });
       // Clean up temp file
-      unlinkSync(tempCardPath);
-      console.log(`[OK] Dataset card uploaded`);
+      try {
+        // Don't fail if cleanup fails
+      } finally {
+        // Keep README.md in workspace for reference
+      }
+      console.log("[OK] Dataset card uploaded");
       return true;
     } catch (error) {
-      console.error(`[ERROR] Failed to upload dataset card: ${error}`);
+      console.error(`[ERROR] Failed to upload dataset card: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
 
   /**
-   * Update manifest
+   * Upload extracted images from workspace/images/ directory.
    */
-  private updateManifest(files: Set<string>) {
-    const manifestPath = join(this.workspace, "manifest.jsonl");
-    const manifest: Array<{
-      file: string;
-      uploaded_at: string;
-    }> = [];
+  uploadImages(): void {
+    const imagesDir = join(this.workspace, "images");
+    if (!existsSync(imagesDir)) return;
 
-    if (existsSync(manifestPath)) {
+    const images = readdirSync(imagesDir).filter((f) =>
+      f.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i)
+    );
+
+    if (images.length === 0) return;
+
+    console.log(`\n[IMAGES] Uploading ${images.length} images...`);
+    for (const image of images) {
+      const imagePath = join(imagesDir, image);
       try {
-        const lines = readFileSync(manifestPath, "utf-8").split("\n");
-        for (const line of lines) {
-          if (line.trim()) {
-            manifest.push(JSON.parse(line));
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
-
-    // Add new entries
-    for (const file of files) {
-      if (!manifest.find((m) => m.file === file)) {
-        manifest.push({
-          file,
-          uploaded_at: new Date().toISOString(),
+        execSync(`hf upload ${this.repo} ${imagePath} images/${image} --repo-type dataset`, {
+          stdio: "pipe",
+          timeout: 60_000,
         });
+        console.log(`  [OK] images/${image}`);
+      } catch (error) {
+        console.error(`  [ERROR] images/${image}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  }
 
-    const content = manifest.map((m) => JSON.stringify(m)).join("\n");
-    writeFileSync(manifestPath, content);
+  /**
+   * Get upload stats without uploading.
+   */
+  stats(): { total: number; uploaded: number; pending: number; rejected: number; totalSize: number } {
+    const files = this.getRedactedSessions();
+    const uploadedSet = this.loadManifest();
+    const rejected = this.loadRejected();
+
+    const pending = files.filter((f) => !uploadedSet.has(f) && !rejected.has(f));
+    const totalSize = pending.reduce((acc, f) => {
+      const filePath = join(this.workspace, "redacted", f);
+      return acc + (existsSync(filePath) ? statSync(filePath).size : 0);
+    }, 0);
+
+    return {
+      total: files.length,
+      uploaded: files.filter((f) => uploadedSet.has(f)).length,
+      pending: pending.length,
+      rejected: rejected.size,
+      totalSize,
+    };
   }
 }

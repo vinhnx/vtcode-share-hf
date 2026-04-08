@@ -9,22 +9,81 @@ bun run build      # TypeScript compilation
 bun run dev        # watch mode
 bun run check      # type check + lint
 bun link           # Install CLI globally
-bun run viewer     # Launch ATIF trajectory viewer (recommended for exploring trajectories)
+bun run viewer     # Launch ATIF trajectory viewer
 ```
 
 ## Architecture
 
-- **[src/redactor.ts](file:///src/redactor.ts)** - PII/secret detection and redaction
-- **[src/session-collector.ts](file:///src/session-collector.ts)** - Workspace management and session collection
-- **[src/hf-uploader.ts](file:///src/hf-uploader.ts)** - HuggingFace dataset operations
-- **[src/cli.ts](file:///src/cli.ts)** - CLI entry point (Commander.js)
+- **src/redactor.ts** — PII/secret detection and redaction (18 pattern types, literal secrets)
+- **src/trufflehog-scanner.ts** — TruffleHog integration for enhanced secret scanning (per-file reports, dedup)
+- **src/session-collector.ts** — Workspace management, session collection, image handling
+- **src/hf-uploader.ts** — HuggingFace dataset operations (upload, manifest, image sync)
+- **src/atif-viewer.ts** — ATIF trajectory viewer (workspace browser, path traversal protection)
+- **src/cli.ts** — CLI entry point (Commander.js)
 
 ## Development workflow
 
-1. **Make changes** in src/
-2. **Build**: `bun run build`
-3. **Test**: `vtcode-share-hf <command>`
-4. **Check**: `bun run check`
+1. Make changes in `src/`
+2. Build: `bun run build`
+3. Test: `vtcode-share-hf <command>`
+4. Check: `bun run check`
+
+## TruffleHog integration
+
+The `TruffleHogScanner` class in `src/trufflehog-scanner.ts` wraps the [trufflehog](https://github.com/trufflesecurity/trufflehog) CLI:
+
+- `isAvailable()` — check if `trufflehog` binary is on PATH
+- `scanFiles(paths)` — run `trufflehog filesystem` on specific files, parse JSON output
+- `scan()` — convenience method: scans all files in redacted directory
+- `getFindingsByFile()` — group findings by session file (legacy compatibility)
+- `saveReport()` — write per-file scan reports to `reports/`
+
+### CLI integration
+
+- `vtcode-share-hf scan` — standalone scan command with `--reject` flag
+- `vtcode-share-hf collect --scan` — run trufflehog after collection
+- `vtcode-share-hf stats` — show upload statistics
+
+### TruffleHog exit codes
+
+- `0` — no findings
+- `183` — findings detected (used with `--fail`)
+- Scanner handles both 0 and 183 gracefully
+
+### Per-file report format
+
+```typescript
+interface TruffleHogFinding {
+  detector: string;
+  decoder?: string;
+  status: "verified" | "unverified" | "unknown";
+  line?: number;
+  raw_sha256?: string;
+  masked: string;
+  file: string;
+}
+
+interface TruffleHogReport {
+  file: string;
+  redacted_hash: string;
+  findings: TruffleHogFinding[];
+  summary: { findings: number; verified: number; unverified: number; unknown: number; top_detectors: string[] };
+}
+```
+
+## Workspace structure
+
+```
+.vtcode-hf/
+├── workspace.json          # config, repo, organization, no_images
+├── manifest.local.jsonl    # local upload manifest
+├── redacted/               # public, ready for upload
+├── reports/                # redaction logs + trufflehog scan reports (*.trufflehog.json)
+├── review/                 # (future) LLM review sidecars
+├── review-chunks/          # (future) review chunk data
+├── images/                 # extracted preserved images
+└── reject.txt              # rejected session filenames
+```
 
 ## Testing redaction
 
@@ -39,55 +98,14 @@ Create a test file with secrets:
 
 Run collector with `--force` to reprocess.
 
-## Workspace structure
-
-```
-.vtcode-hf/
-├── workspace.json          # config, repo, organization
-├── manifest.jsonl          # upload manifest (remote-backed)
-├── manifest.local.jsonl    # local manifest
-├── redacted/               # public, ready for upload
-├── reports/                # deterministic redaction logs
-├── review/                 # (future) LLM review sidecars
-├── review-chunks/          # (future) transcript chunks
-├── images/                 # (future) extracted images
-└── reject.txt              # rejected session filenames
-```
-
-## Integration with trufflehog
-
-The tool can be enhanced with `trufflehog` for advanced secret detection:
-
-```bash
-pip install trufflehog
-```
-
-Future integration points:
-- Run `trufflehog filesystem` on session transcripts
-- Parse findings and apply additional redaction
-- Generate security report in workspace
-
-## Future enhancements
-
-1. **LLM Review**: Integrate with Claude/GPT for semantic review (like pi-share-hf)
-2. **Image extraction**: Extract and handle embedded images
-3. **Trufflehog integration**: Advanced secret scanning
-4. **Parallel processing**: Speed up collection with worker threads
-5. **Dataset card generation**: Auto-create README.md with proper citations
-6. **S3 backend**: Upload to S3 instead of HF Git
-7. **Delta sync**: Only upload new/changed sessions
-8. **Manifest caching**: Cache remote manifest locally
-
 ## CI/CD
-
-To set up continuous collection:
 
 ```yaml
 # .github/workflows/vtcode-share.yml
 name: Collect vtcode sessions
 on:
   schedule:
-    - cron: '0 0 * * *'  # Daily
+    - cron: '0 0 * * *'
 
 jobs:
   collect:
@@ -98,7 +116,7 @@ jobs:
       - run: bun install
       - run: bun run build
       - run: bun vtcode-share-hf init --repo ${{ secrets.HF_REPO }}
-      - run: bun vtcode-share-hf collect --secret "${{ secrets.API_KEY }}"
+      - run: bun vtcode-share-hf collect --scan --secret "${{ secrets.API_KEY }}"
       - run: bun vtcode-share-hf upload
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -108,19 +126,18 @@ jobs:
 
 Before uploading:
 
-- [ ] Review `.vtcode-hf/reports/` for redaction findings
-- [ ] Spot-check `.vtcode-hf/redacted/` for private keywords
-- [ ] Verify all API keys are in secrets list
-- [ ] Run `grep` to search for known patterns
+- [ ] Review `reports/` for redaction findings
+- [ ] Spot-check `redacted/` for private keywords
+- [ ] Run `vtcode-share-hf scan` for trufflehog findings (use `--reject` to auto-reject)
+- [ ] Use `vtcode-share-hf stats` to review upload status
 - [ ] Use `--dry-run` before real upload
-- [ ] Check rejected session list makes sense
+- [ ] Check rejected session list
 
 ## References
 
-- [pi-share-hf](https://github.com/badlogic/pi-share-hf) - Original tool
-- [VTCode](https://github.com/vinhnx/VTCode) - The coding agent this tool works with
-- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) - Agent Trajectory Interchange Format specification
-- [Commander.js](https://github.com/tj/commander.js) - CLI framework
-- [trufflehog](https://github.com/trufflesecurity/trufflehog) - Secret scanning
-- [HuggingFace Hub](https://github.com/huggingface/huggingface_hub) - Python client
-- [HuggingFace Documentation](https://huggingface.co/docs) - Official HuggingFace documentation
+- [pi-share-hf](https://github.com/badlogic/pi-share-hf) — Original tool
+- [VTCode](https://github.com/vinhnx/VTCode) — The coding agent
+- [trufflehog](https://github.com/trufflesecurity/trufflehog) — Secret scanning
+- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) — Agent trajectory format
+- [Commander.js](https://github.com/tj/commander.js) — CLI framework
+- [HuggingFace Hub](https://github.com/huggingface/huggingface_hub) — Python client

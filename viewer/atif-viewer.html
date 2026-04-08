@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATIF Trajectory Viewer</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-color: #58a6ff;
+            --accent-hover: #79c0ff;
+            --border-color: #30363d;
+            --success-color: #3fb950;
+            --warning-color: #d29922;
+            --error-color: #f85149;
+            --purple: #bc8cff;
+            --orange: #f0883e;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        /* Layout */
+        .app { display: flex; min-height: 100vh; }
+        .sidebar {
+            width: 320px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Sidebar */
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .sidebar-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .search-input {
+            width: 100%;
+            padding: 6px 12px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .search-input:focus { outline: none; border-color: var(--accent-color); }
+        .search-input::placeholder { color: var(--text-secondary); }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        .session-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 2px;
+            transition: background 0.15s;
+        }
+        .session-item:hover { background: var(--bg-tertiary); }
+        .session-item.active { background: rgba(88, 166, 255, 0.15); border-left: 3px solid var(--accent-color); }
+        .session-item.rejected { opacity: 0.5; }
+        .session-name {
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .session-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* Main content */
+        .main-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .main-header h1 { font-size: 18px; font-weight: 600; }
+
+        .tab-bar {
+            display: flex;
+            gap: 4px;
+        }
+        .tab {
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.15s;
+        }
+        .tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+        .tab.active { color: var(--text-primary); background: var(--bg-tertiary); }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+        }
+
+        /* Welcome state */
+        .welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+        .welcome h2 { font-size: 24px; margin-bottom: 8px; color: var(--text-primary); }
+        .welcome p { font-size: 14px; max-width: 400px; }
+
+        .file-drop {
+            margin-top: 24px;
+            padding: 32px;
+            border: 2px dashed var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .file-drop:hover, .file-drop.dragover {
+            border-color: var(--accent-color);
+            background: rgba(88, 166, 255, 0.05);
+        }
+
+        /* Session info header */
+        .session-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .info-card {
+            background: var(--bg-secondary);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .info-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-value { font-size: 14px; font-family: 'SF Mono', 'Courier New', monospace; margin-top: 4px; }
+
+        /* Steps */
+        .step {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .step-header {
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: background 0.15s;
+        }
+        .step-header:hover { background: var(--bg-tertiary); }
+        .step-meta-row { display: flex; align-items: center; gap: 12px; }
+        .step-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .step-badge.user { background: rgba(63, 185, 129, 0.2); color: var(--success-color); }
+        .step-badge.assistant { background: rgba(188, 140, 255, 0.2); color: var(--purple); }
+        .step-badge.system { background: rgba(210, 153, 34, 0.2); color: var(--warning-color); }
+        .step-time { font-size: 12px; color: var(--text-secondary); }
+        .step-arrow { color: var(--text-secondary); transition: transform 0.2s; }
+        .step-arrow.open { transform: rotate(90deg); }
+
+        .step-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        .step-content.open { max-height: 50000px; }
+        .step-body { padding: 16px; }
+
+        .message-block {
+            background: var(--bg-color);
+            padding: 16px;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-color);
+            white-space: pre-wrap;
+            font-family: 'SF Mono', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .reasoning-block {
+            background: rgba(210, 153, 34, 0.1);
+            padding: 16px;
+            border-radius: 6px;
+            border-left: 3px solid var(--warning-color);
+            margin-top: 12px;
+            font-size: 13px;
+        }
+
+        .tool-call {
+            background: rgba(188, 140, 255, 0.08);
+            border: 1px solid rgba(188, 140, 255, 0.2);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        .tool-call-name { font-weight: 600; color: var(--purple); font-size: 13px; }
+        .tool-call-args {
+            background: var(--bg-color);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Courier New', monospace;
+            font-size: 12px;
+            margin-top: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .observation-block {
+            background: rgba(63, 185, 129, 0.08);
+            border: 1px solid rgba(63, 185, 129, 0.2);
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 8px;
+        }
+        .observation-content {
+            white-space: pre-wrap;
+            font-family: 'SF Mono', 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .metric {
+            text-align: center;
+            padding: 8px;
+            background: var(--bg-color);
+            border-radius: 6px;
+        }
+        .metric-value { font-size: 18px; font-weight: 700; color: var(--accent-color); }
+        .metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; margin-top: 2px; }
+        .metric-cost { color: var(--success-color) !important; }
+
+        /* Raw JSON view */
+        .raw-json {
+            background: var(--bg-color);
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'SF Mono', 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre;
+            overflow-x: auto;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        /* Loading / Error */
+        .loading { text-align: center; padding: 40px; color: var(--accent-color); }
+        .error {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 6px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+        .btn:hover { background: var(--border-color); }
+        .btn-primary { background: var(--accent-color); border-color: var(--accent-color); color: #fff; }
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        .toolbar { display: flex; gap: 8px; align-items: center; }
+        .expand-all-btn { font-size: 12px; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .session-info { grid-template-columns: 1fr 1fr; }
+            .metrics { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>Sessions</h2>
+                <input type="text" class="search-input" id="session-search" placeholder="Search sessions...">
+            </div>
+            <div class="session-list" id="session-list">
+                <div class="loading" id="sidebar-loading">Loading...</div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="main-header">
+                <h1>ATIF Trajectory Viewer</h1>
+                <div class="tab-bar">
+                    <div class="tab active" data-tab="visual" onclick="switchTab('visual')">Visual</div>
+                    <div class="tab" data-tab="json" onclick="switchTab('json')">Raw JSON</div>
+                </div>
+                <div style="flex:1"></div>
+                <div class="toolbar">
+                    <button class="btn expand-all-btn" onclick="toggleExpandAll()">Expand All</button>
+                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">Open File</button>
+                </div>
+            </header>
+
+            <input type="file" id="file-input" accept=".json,.jsonl" style="display:none">
+
+            <div class="content" id="content">
+                <div class="welcome" id="welcome">
+                    <h2>ATIF Trajectory Viewer</h2>
+                    <p>View agent trajectory files from VTCode sessions</p>
+                    <div class="file-drop" id="file-drop">
+                        <p>Drop a <code>.json</code> or <code>.jsonl</code> file here</p>
+                        <p style="font-size:12px; margin-top:8px; color: var(--text-secondary)">or click to browse</p>
+                    </div>
+                </div>
+
+                <div id="viewer" style="display:none">
+                    <div class="session-info" id="session-info"></div>
+                    <div id="steps-container"></div>
+                    <div id="json-view" style="display:none">
+                        <div class="raw-json" id="raw-json"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let trajectoryData = null;
+        let sessions = [];
+        let rejectedSessions = new Set();
+        let expandedSteps = new Set();
+        let allExpanded = false;
+        let currentTab = 'visual';
+
+        // Init
+        document.getElementById('file-input').addEventListener('change', handleFileSelect);
+        document.getElementById('file-drop').addEventListener('click', () => document.getElementById('file-input').click());
+        document.getElementById('file-drop').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('dragover'); });
+        document.getElementById('file-drop').addEventListener('dragleave', (e) => e.currentTarget.classList.remove('dragover'));
+        document.getElementById('file-drop').addEventListener('drop', handleDrop);
+        document.getElementById('session-search').addEventListener('input', filterSessions);
+
+        // Try loading workspace sessions
+        loadWorkspaceSessions();
+
+        async function loadWorkspaceSessions() {
+            const loading = document.getElementById('sidebar-loading');
+            try {
+                const resp = await fetch('/api/sessions');
+                if (!resp.ok) throw new Error('Failed');
+                const data = await resp.json();
+                sessions = data.sessions || [];
+                rejectedSessions = new Set(data.rejected || []);
+                loading.style.display = 'none';
+                renderSessionList();
+            } catch {
+                loading.textContent = 'No workspace sessions.\nDrop a file to view.';
+            }
+        }
+
+        function renderSessionList(filter = '') {
+            const container = document.getElementById('session-list');
+            const filtered = sessions.filter(s => s.filename.toLowerCase().includes(filter.toLowerCase()));
+            if (filtered.length === 0) {
+                container.innerHTML = '<div style="padding:16px;color:var(--text-secondary);font-size:13px;text-align:center">No sessions found</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(s => {
+                const isRejected = rejectedSessions.has(s.filename);
+                const sizeKB = (s.size / 1024).toFixed(1);
+                return `<div class="session-item ${isRejected ? 'rejected' : ''}" data-file="${s.filename}" onclick="loadSession('${s.filename}')">
+                    <div class="session-name">${s.filename}</div>
+                    <div class="session-meta">${sizeKB} KB · ${new Date(s.modified).toLocaleDateString()}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterSessions(e) {
+            renderSessionList(e.target.value);
+        }
+
+        async function loadSession(filename) {
+            // Update active state
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            const activeEl = document.querySelector(`.session-item[data-file="${filename}"]`);
+            if (activeEl) activeEl.classList.add('active');
+
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="loading">Loading trajectory...</div>';
+
+            try {
+                const resp = await fetch(`/api/trajectory?file=${encodeURIComponent(filename)}`);
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to load');
+                }
+                const data = await resp.json();
+                trajectoryData = data;
+                renderTrajectory(data);
+            } catch (err) {
+                content.innerHTML = `<div class="error">Error loading trajectory: ${err.message}</div>`;
+            }
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) readFile(file);
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) readFile(file);
+        }
+
+        function readFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    trajectoryData = data;
+                    renderTrajectory(data);
+                } catch (err) {
+                    document.getElementById('content').innerHTML = `<div class="error">Error parsing JSON: ${err.message}</div>`;
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function renderTrajectory(data) {
+            // Handle JSONL-derived format: { lines: [...] }
+            if (data.lines && Array.isArray(data.lines)) {
+                const steps = data.lines.flatMap((line, idx) => {
+                    if (line.steps) return line.steps;
+                    if (line.source) return [{ ...line, step_id: line.step_id || idx + 1 }];
+                    return [];
+                });
+                data.steps = steps;
+            }
+
+            const welcome = document.getElementById('welcome');
+            const viewer = document.getElementById('viewer');
+            if (welcome) welcome.style.display = 'none';
+            viewer.style.display = 'block';
+
+            renderSessionInfo(data);
+            renderSteps(data.steps || []);
+            document.getElementById('raw-json').textContent = JSON.stringify(data, null, 2);
+        }
+
+        function renderSessionInfo(data) {
+            const container = document.getElementById('session-info');
+            const info = [
+                { label: 'Schema', value: data.schema_version || '—' },
+                { label: 'Session ID', value: data.session_id || '—' },
+                { label: 'Agent', value: `${data.agent?.name || '—'} v${data.agent?.version || ''}` },
+                { label: 'Model', value: data.agent?.model_name || '—' },
+            ];
+            container.innerHTML = info.map(i =>
+                `<div class="info-card"><div class="info-label">${i.label}</div><div class="info-value">${i.value}</div></div>`
+            ).join('');
+        }
+
+        function renderSteps(steps) {
+            const container = document.getElementById('steps-container');
+            expandedSteps.clear();
+            container.innerHTML = steps.map((step, idx) => createStepHTML(step, idx)).join('');
+        }
+
+        function createStepHTML(step, idx) {
+            const source = (step.source || 'unknown').toLowerCase();
+            const sourceClass = source.includes('user') ? 'user' : source.includes('assistant') || source.includes('agent') ? 'assistant' : 'system';
+
+            let bodyHTML = '';
+            if (step.message) bodyHTML += `<div class="message-block">${escapeHtml(step.message)}</div>`;
+            if (step.reasoning_content) bodyHTML += `<div class="reasoning-block"><strong>Reasoning:</strong><br>${escapeHtml(step.reasoning_content)}</div>`;
+
+            if (step.tool_calls?.length) {
+                bodyHTML += step.tool_calls.map(call =>
+                    `<div class="tool-call">
+                        <div class="tool-call-name">${call.function_name || call.name || 'unknown'}</div>
+                        <div class="tool-call-args">${escapeHtml(JSON.stringify(call.arguments || call.args || {}, null, 2))}</div>
+                    </div>`
+                ).join('');
+            }
+
+            if (step.observation) {
+                const results = Array.isArray(step.observation.results) ? step.observation.results : [step.observation];
+                bodyHTML += results.map(r =>
+                    `<div class="observation-block">
+                        <div class="observation-content">${escapeHtml(r.content || r.output || r.result || JSON.stringify(r))}</div>
+                    </div>`
+                ).join('');
+            }
+
+            if (step.metrics) {
+                bodyHTML += `<div class="metrics">${createMetricsHTML(step.metrics)}</div>`;
+            }
+
+            return `<div class="step" data-idx="${idx}">
+                <div class="step-header" onclick="toggleStep(${idx})">
+                    <div class="step-meta-row">
+                        <span class="step-badge ${sourceClass}">${step.source || 'unknown'}</span>
+                        <span class="step-time">${formatTimestamp(step.timestamp)}</span>
+                    </div>
+                    <span class="step-arrow" id="arrow-${idx}">▶</span>
+                </div>
+                <div class="step-content" id="content-${idx}">
+                    <div class="step-body">${bodyHTML}</div>
+                </div>
+            </div>`;
+        }
+
+        function createMetricsHTML(metrics) {
+            const items = [];
+            if (metrics.prompt_tokens !== undefined) items.push({ value: metrics.prompt_tokens, label: 'Prompt' });
+            if (metrics.completion_tokens !== undefined) items.push({ value: metrics.completion_tokens, label: 'Completion' });
+            if (metrics.cached_tokens !== undefined) items.push({ value: metrics.cached_tokens, label: 'Cached' });
+            if (metrics.total_tokens !== undefined) items.push({ value: metrics.total_tokens, label: 'Total' });
+            if (metrics.cost_usd !== undefined) items.push({ value: `$${metrics.cost_usd.toFixed(4)}`, label: 'Cost', isCost: true });
+            return items.map(i =>
+                `<div class="metric"><div class="metric-value ${i.isCost ? 'metric-cost' : ''}">${i.value}</div><div class="metric-label">${i.label}</div></div>`
+            ).join('');
+        }
+
+        function toggleStep(idx) {
+            const content = document.getElementById(`content-${idx}`);
+            const arrow = document.getElementById(`arrow-${idx}`);
+            if (!content || !arrow) return;
+
+            if (expandedSteps.has(idx)) {
+                expandedSteps.delete(idx);
+                content.classList.remove('open');
+                arrow.classList.remove('open');
+            } else {
+                expandedSteps.add(idx);
+                content.classList.add('open');
+                arrow.classList.add('open');
+            }
+        }
+
+        function toggleExpandAll() {
+            allExpanded = !allExpanded;
+            const steps = document.querySelectorAll('.step');
+            steps.forEach((_, idx) => {
+                const content = document.getElementById(`content-${idx}`);
+                const arrow = document.getElementById(`arrow-${idx}`);
+                if (!content || !arrow) return;
+                if (allExpanded) {
+                    expandedSteps.add(idx);
+                    content.classList.add('open');
+                    arrow.classList.add('open');
+                } else {
+                    expandedSteps.delete(idx);
+                    content.classList.remove('open');
+                    arrow.classList.remove('open');
+                }
+            });
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+            const stepsContainer = document.getElementById('steps-container');
+            const jsonView = document.getElementById('json-view');
+            if (tab === 'visual') {
+                stepsContainer.style.display = '';
+                jsonView.style.display = 'none';
+            } else {
+                stepsContainer.style.display = 'none';
+                jsonView.style.display = '';
+            }
+        }
+
+        function formatTimestamp(ts) {
+            if (!ts) return '';
+            try { return new Date(ts).toLocaleTimeString(); } catch { return ts; }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = typeof text === 'string' ? text : JSON.stringify(text);
+            return div.innerHTML;
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && currentTab === 'json') switchTab('visual');
+            if (e.key === 'o' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); document.getElementById('file-input').click(); }
+        });
+    </script>
+</body>
+</html>

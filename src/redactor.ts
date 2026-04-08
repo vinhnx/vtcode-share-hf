@@ -1,94 +1,137 @@
 import { createHash } from "crypto";
 
-export interface RedactionResult {
-  text: string;
-  redactions: Array<{ original: string; redacted: string; reason: string }>;
+export interface RedactionFinding {
+  detector: string;
+  severity: "critical" | "high" | "medium";
+  jsonPath?: string;
+  replacement: string;
+  count: number;
 }
 
-/**
- * Redacts PII and secrets from text
- */
+export interface RedactionResult {
+  text: string;
+  redactions: RedactionFinding[];
+}
+
+export interface SecretEntry {
+  name: string;
+  value: string;
+  replacement: string;
+}
+
+// Pre-compiled pattern definitions — fresh RegExp instances created per redact() call
+// to avoid lastIndex mutation bugs with /g flags.
+const PATTERN_DEFINITIONS: Array<{ regex: string; type: string; severity: "critical" | "high" | "medium" }> = [
+  { regex: "sk-proj-[A-Za-z0-9_\\-]{20,}", type: "OPENAI_PROJECT_KEY", severity: "critical" },
+  { regex: "sk-[A-Za-z0-9_\\-]{20,}", type: "OPENAI_KEY", severity: "critical" },
+  { regex: "pk-[A-Za-z0-9_\\-]{20,}", type: "PUBLIC_KEY", severity: "high" },
+  { regex: "ant-[A-Za-z0-9]{20,}", type: "ANTHROPIC_KEY", severity: "critical" },
+  { regex: "AKIA[0-9A-Z]{16}", type: "AWS_ACCESS_KEY", severity: "critical" },
+  { regex: "gh[pousr]_[A-Za-z0-9_]{36,}", type: "GITHUB_TOKEN", severity: "critical" },
+  { regex: "xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*", type: "SLACK_TOKEN", severity: "critical" },
+  { regex: "AIza[0-9A-Za-z_-]{35}", type: "GOOGLE_API_KEY", severity: "critical" },
+  { regex: "ya29\\.[0-9A-Za-z_-]+", type: "GOOGLE_OAUTH", severity: "critical" },
+  { regex: "eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+", type: "JWT_TOKEN", severity: "high" },
+  { regex: "npm_[A-Za-z0-9]{36}", type: "NPM_TOKEN", severity: "critical" },
+  { regex: "glpat-[A-Za-z0-9_\\-]{20,}", type: "GITLAB_TOKEN", severity: "critical" },
+  { regex: "dckr_pat_[A-Za-z0-9_\\-]{20,}", type: "DOCKER_TOKEN", severity: "critical" },
+  { regex: "gho_[A-Za-z0-9]{36}", type: "GITHUB_OAUTH", severity: "critical" },
+  { regex: "[A-Za-z0-9]{32}\\.[A-Za-z0-9]{16}\\.[A-Za-z0-9]{20,}", type: "GENERIC_API_KEY", severity: "high" },
+  { regex: "postgres(ql)?://[^\\s\"']{10,}", type: "DATABASE_URL", severity: "critical" },
+  { regex: "mongodb(\\+srv)?://[^\\s\"']{10,}", type: "DATABASE_URL", severity: "critical" },
+  { regex: "https?://[^\\s\"']*:[^\\s\"'@]+@[^\\s\"']+", type: "URL_WITH_CREDENTIALS", severity: "high" },
+];
+
 export class Redactor {
-  private secrets: Set<string> = new Set();
-  private patterns: RegExp[] = [];
+  private literalSecrets: SecretEntry[] = [];
 
   constructor(secretsInput?: string | string[]) {
-    this.initializePatterns();
     this.addSecrets(secretsInput);
   }
 
-  /**
-   * Initialize common secret/API key patterns
-   */
-  private initializePatterns() {
-    this.patterns = [
-      // API Keys and tokens
-      /sk-[A-Za-z0-9\-_]{20,}/g, // OpenAI keys
-      /pk-[A-Za-z0-9\-_]{20,}/g,
-      /[A-Za-z0-9\-_]{20,}:[A-Za-z0-9\-_]{20,}/g, // Generic key:secret pattern
-      /\b(?:password|passwd|pwd|secret|token|auth|key)\s*=\s*[^\s;,]+/gi,
-      /\b(?:AWS_SECRET|GITHUB_TOKEN|OPENAI_API_KEY)\s*=\s*[^\s;,]+/gi,
-      // AWS patterns
-      /AKIA[0-9A-Z]{16}/g,
-      // GitHub tokens
-      /gh[pousr]{1}_[A-Za-z0-9_]{36,255}/g,
-      // Email addresses
-      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-    ];
-  }
-
-  /**
-   * Add secrets to redact
-   */
   addSecrets(input?: string | string[]) {
     if (!input) return;
 
     const items = Array.isArray(input) ? input : [input];
     for (const item of items) {
-      if (item.includes("\n")) {
-        item.split("\n").forEach((line) => {
-          const trimmed = line.trim();
-          if (trimmed) this.secrets.add(trimmed);
-        });
-      } else {
-        this.secrets.add(item);
+      if (!item.trim()) continue;
+
+      // Handle key=value pairs from env files (e.g., "export API_KEY=sk-abc123")
+      const lines = item.includes("\n") ? item.split("\n") : [item];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Extract value from export KEY=VALUE or KEY=VALUE patterns
+        const secretValue = this.extractSecretValue(trimmed);
+        if (secretValue && secretValue.length > 2) {
+          const replacement = `[REDACTED:${this.hash(secretValue)}]`;
+          // Avoid duplicates
+          if (!this.literalSecrets.some((s) => s.value === secretValue)) {
+            this.literalSecrets.push({ name: trimmed.substring(0, 50), value: secretValue, replacement });
+          }
+        }
       }
     }
   }
 
   /**
-   * Redact secrets and PII from text
+   * Extract the secret value from lines like:
+   *   export API_KEY=sk-abc123
+   *   API_KEY="sk-abc123"
+   *   sk-abc123
    */
+  private extractSecretValue(line: string): string | null {
+    // export KEY=VALUE or KEY=VALUE (with optional quotes)
+    const match = line.match(/(?:export\s+)?\w+=["']?(.+?)["']?\s*$/);
+    if (match && match[1].length > 2) {
+      return match[1];
+    }
+    // Plain value (no = sign)
+    if (!line.includes("=") && line.length > 3) {
+      return line;
+    }
+    return null;
+  }
+
   redact(text: string): RedactionResult {
     let result = text;
-    const redactions: Array<{ original: string; redacted: string; reason: string }> = [];
+    const redactions: RedactionFinding[] = [];
 
-    // Redact explicit secrets
-    for (const secret of this.secrets) {
-      if (secret && result.includes(secret)) {
-        const redacted = `[REDACTED_SECRET_${this.hash(secret)}]`;
+    // 1. First pass: literal secret redaction (exact match, highest priority)
+    for (const secret of this.literalSecrets) {
+      const count = this.countOccurrences(result, secret.value);
+      if (count > 0) {
+        result = result.split(secret.value).join(secret.replacement);
         redactions.push({
-          original: secret,
-          redacted,
-          reason: "explicit_secret",
+          detector: "literal-secret",
+          severity: "critical",
+          replacement: secret.replacement,
+          count,
         });
-        result = result.split(secret).join(redacted);
       }
     }
 
-    // Redact pattern matches
-    for (const pattern of this.patterns) {
-      let match;
-      while ((match = pattern.exec(text)) !== null) {
-        const original = match[0];
-        if (!this.secrets.has(original)) {
-          const redacted = `[REDACTED_${this.classifySecret(original)}]`;
+    // 2. Second pass: pattern-based redaction
+    // Create FRESH RegExp instances to avoid lastIndex bugs
+    for (const { regex: pattern, type, severity } of PATTERN_DEFINITIONS) {
+      const regex = new RegExp(pattern, "g");
+      const matches = result.match(regex);
+      if (matches) {
+        const uniqueMatches = [...new Set(matches)];
+        for (const match of uniqueMatches) {
+          // Skip if already redacted by literal secrets
+          if (this.literalSecrets.some((s) => s.value === match)) continue;
+
+          const replacement = `[REDACTED:${type}]`;
+          const count = this.countOccurrences(result, match);
+          result = result.split(match).join(replacement);
           redactions.push({
-            original,
-            redacted,
-            reason: "pattern_match",
+            detector: type,
+            severity,
+            replacement,
+            count,
           });
-          result = result.split(original).join(redacted);
         }
       }
     }
@@ -96,49 +139,61 @@ export class Redactor {
     return { text: result, redactions };
   }
 
-  /**
-   * Redact JSON object recursively
-   */
-  redactObject(obj: any): { obj: any; redactions: RedactionResult[] } {
+  redactObject(obj: unknown, path: string = "$"): { obj: unknown; redactions: RedactionResult[] } {
     const redactions: RedactionResult[] = [];
+    const seen = new Set<unknown>();
 
-    const recurse = (item: any): any => {
+    const recurse = (item: unknown, currentPath: string): unknown => {
       if (typeof item === "string") {
         const result = this.redact(item);
         if (result.redactions.length > 0) {
           redactions.push(result);
         }
         return result.text;
-      } else if (Array.isArray(item)) {
-        return item.map(recurse);
-      } else if (typeof item === "object" && item !== null) {
-        const redacted: any = {};
-        for (const key in item) {
-          redacted[key] = recurse(item[key]);
-        }
-        return redacted;
       }
-      return item;
+
+      if (item === null || typeof item !== "object") {
+        return item;
+      }
+
+      if (seen.has(item)) {
+        return item;
+      }
+      seen.add(item);
+
+      if (Array.isArray(item)) {
+        return item.map((val, i) => recurse(val, `${currentPath}[${i}]`));
+      }
+
+      const redacted: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(item as Record<string, unknown>)) {
+        const childPath = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+          ? `${currentPath}.${key}`
+          : `${currentPath}[${JSON.stringify(key)}]`;
+        redacted[key] = recurse(val, childPath);
+      }
+      return redacted;
     };
 
-    return { obj: recurse(obj), redactions };
+    return { obj: recurse(obj, path), redactions };
   }
 
-  /**
-   * Classify the type of secret
-   */
-  private classifySecret(text: string): string {
-    if (/^sk-/.test(text)) return "OPENAI_KEY";
-    if (/^AKIA/.test(text)) return "AWS_KEY";
-    if (/^gh[pousr]_/.test(text)) return "GITHUB_TOKEN";
-    if (/@/.test(text)) return "EMAIL";
-    if (/\bpassword\b/i.test(text)) return "PASSWORD";
-    return "SECRET";
+  /** Count non-overlapping occurrences of needle in haystack */
+  countOccurrences(haystack: string, needle: string): number {
+    if (!needle) return 0;
+    let count = 0;
+    let pos = 0;
+    while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+      count++;
+      pos += needle.length;
+    }
+    return count;
   }
 
-  /**
-   * Hash a secret for reference
-   */
+  getSecretsCount(): number {
+    return this.literalSecrets.length;
+  }
+
   private hash(text: string): string {
     return createHash("sha256").update(text).digest("hex").substring(0, 8);
   }
