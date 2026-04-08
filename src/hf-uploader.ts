@@ -1,6 +1,8 @@
 import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, statSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { atomicWrite } from "./atomic-write.js";
+import { isSessionFile, loadLineSet } from "./session-file-utils.js";
 
 interface UploadedEntry {
   filename: string;
@@ -228,12 +230,8 @@ MIT License
 
   private getRedactedSessions(): string[] {
     const redactedDir = join(this.workspace, "redacted");
-    if (!existsSync(redactedDir)) {
-      return [];
-    }
-    return readdirSync(redactedDir)
-      .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
-      .sort();
+    if (!existsSync(redactedDir)) return [];
+    return readdirSync(redactedDir).filter(isSessionFile).sort();
   }
 
   /**
@@ -265,9 +263,6 @@ MIT License
     return sessions;
   }
 
-  /**
-   * Save manifest atomically. Rebuilds the entire manifest from the set of filenames.
-   */
   private saveManifest(sessions: Set<string>) {
     const manifestPath = join(this.workspace, "manifest.local.jsonl");
     const entries: UploadedEntry[] = [];
@@ -278,20 +273,13 @@ MIT License
       entries.push({ filename: file, uploaded_at: new Date().toISOString(), size_bytes: sizeBytes });
     }
 
-    const tmpPath = `${manifestPath}.tmp`;
     const content = entries.map((e) => JSON.stringify(e)).join("\n");
-    writeFileSync(tmpPath, content + "\n", "utf-8");
-    renameSync(tmpPath, manifestPath);
+    atomicWrite(manifestPath, content + "\n");
   }
 
   private loadRejected(): Set<string> {
     const rejectPath = join(this.workspace, "reject.txt");
-    if (!existsSync(rejectPath)) return new Set();
-    return new Set(
-      readFileSync(rejectPath, "utf-8")
-        .split("\n")
-        .filter((l) => l.trim())
-    );
+    return loadLineSet(rejectPath);
   }
 
   uploadDatasetCard(): boolean {

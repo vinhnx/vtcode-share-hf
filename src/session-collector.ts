@@ -1,7 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join, basename } from "path";
 import { createHash } from "crypto";
 import { Redactor } from "./redactor.js";
+import { atomicWrite } from "./atomic-write.js";
+import { loadLineSet, isSessionFile, saveLineSet } from "./session-file-utils.js";
 
 export interface SessionMetadata {
   filename: string;
@@ -151,9 +153,7 @@ export class SessionCollector {
 
       // Atomic write: write to temp file then rename
       const outputPath = join(this.workspace.sessions_path, filename);
-      const tmpPath = `${outputPath}.tmp`;
-      writeFileSync(tmpPath, redactedContent, "utf-8");
-      renameSync(tmpPath, outputPath);
+      atomicWrite(outputPath, redactedContent);
 
       // Write report
       const report = {
@@ -167,9 +167,7 @@ export class SessionCollector {
         redaction_details: redactions,
       };
       const reportPath = join(this.workspace.workspace_path, "reports", `${filename}.report.json`);
-      const reportTmp = `${reportPath}.tmp`;
-      writeFileSync(reportTmp, JSON.stringify(report, null, 2), "utf-8");
-      renameSync(reportTmp, reportPath);
+      atomicWrite(reportPath, JSON.stringify(report, null, 2));
 
       const metadata: SessionMetadata = {
         filename,
@@ -192,10 +190,6 @@ export class SessionCollector {
     }
   }
 
-  /**
-   * Extract embedded base64 images from redacted sessions into workspace/images/.
-   * Returns map of session filename -> extracted image filenames.
-   */
   extractImages(sessionFiles?: string[]): Map<string, string[]> {
     const files = sessionFiles || this.getRedactedSessions();
     const imageDir = join(this.workspace.workspace_path, "images");
@@ -349,29 +343,23 @@ export class SessionCollector {
     }
 
     // Atomic write
-    const tmpPath = `${manifestPath}.tmp`;
     const content = entries.map((e) => JSON.stringify(e)).join("\n");
-    writeFileSync(tmpPath, content + "\n", "utf-8");
-    renameSync(tmpPath, manifestPath);
+    atomicWrite(manifestPath, content + "\n");
   }
 
   saveWorkspaceConfig() {
     const configPath = join(this.workspace.workspace_path, "workspace.json");
-    const tmpPath = `${configPath}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(this.workspace, null, 2), "utf-8");
-    renameSync(tmpPath, configPath);
+    atomicWrite(configPath, JSON.stringify(this.workspace, null, 2));
   }
 
   loadWorkspaceConfig(): WorkspaceConfig | null {
     const configPath = join(this.workspace.workspace_path, "workspace.json");
-    if (existsSync(configPath)) {
-      try {
-        return JSON.parse(readFileSync(configPath, "utf-8"));
-      } catch {
-        return null;
-      }
+    if (!existsSync(configPath)) return null;
+    try {
+      return JSON.parse(readFileSync(configPath, "utf-8"));
+    } catch {
+      return null;
     }
-    return null;
   }
 
   private hashContent(content: string): string {
@@ -389,12 +377,8 @@ export class SessionCollector {
 
   getRedactedSessions(): string[] {
     const dir = this.workspace.sessions_path;
-    if (!existsSync(dir)) {
-      return [];
-    }
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
-      .sort();
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir).filter(isSessionFile).sort();
   }
 
   getUploadableSessions(): string[] {
@@ -404,32 +388,21 @@ export class SessionCollector {
 
   loadRejected(): Set<string> {
     const rejectPath = join(this.workspace.workspace_path, "reject.txt");
-    if (!existsSync(rejectPath)) {
-      return new Set();
-    }
-    return new Set(
-      readFileSync(rejectPath, "utf-8")
-        .split("\n")
-        .filter((l) => l.trim())
-    );
+    return loadLineSet(rejectPath);
   }
 
   addRejected(filename: string) {
     const rejectPath = join(this.workspace.workspace_path, "reject.txt");
     const rejected = this.loadRejected();
     rejected.add(filename);
-    const tmpPath = `${rejectPath}.tmp`;
-    writeFileSync(tmpPath, [...rejected].sort().join("\n") + "\n", "utf-8");
-    renameSync(tmpPath, rejectPath);
+    saveLineSet(rejectPath, rejected);
   }
 
   removeRejected(filename: string) {
     const rejectPath = join(this.workspace.workspace_path, "reject.txt");
     const rejected = this.loadRejected();
     rejected.delete(filename);
-    const tmpPath = `${rejectPath}.tmp`;
-    writeFileSync(tmpPath, [...rejected].sort().join("\n") + "\n", "utf-8");
-    renameSync(tmpPath, rejectPath);
+    saveLineSet(rejectPath, rejected);
   }
 
   /**

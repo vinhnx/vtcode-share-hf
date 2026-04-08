@@ -1,7 +1,9 @@
 import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, basename, resolve } from "path";
 import { createHash } from "crypto";
+import { atomicWrite } from "./atomic-write.js";
+import { isSessionFile } from "./session-file-utils.js";
 
 export interface TruffleHogFinding {
   detector: string;
@@ -212,7 +214,7 @@ export class TruffleHogScanner {
     }
 
     const files = readdirSync(scanDir)
-      .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
+      .filter(isSessionFile)
       .map((f) => join(scanDir, f));
 
     return this.scanFiles(files);
@@ -256,16 +258,13 @@ export class TruffleHogScanner {
 
     for (const [filename, report] of result.reports) {
       const reportPath = join(reportDir, `${filename}.trufflehog.json`);
-      const tmpPath = `${reportPath}.tmp`;
-      writeFileSync(tmpPath, JSON.stringify(report, null, 2), "utf-8");
-      renameSync(tmpPath, reportPath);
+      atomicWrite(reportPath, JSON.stringify(report, null, 2));
       paths.push(reportPath);
     }
 
     // Also save aggregate summary
     const summaryPath = join(reportDir, "trufflehog-scan.json");
-    const tmpPath = `${summaryPath}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify({
+    atomicWrite(summaryPath, JSON.stringify({
       timestamp: new Date().toISOString(),
       totalFindings: result.totalFindings,
       verifiedCount: result.verifiedCount,
@@ -273,8 +272,7 @@ export class TruffleHogScanner {
       unknownCount: result.unknownCount,
       scannedFiles: result.scannedFiles,
       scanDurationMs: result.scanDurationMs,
-    }, null, 2), "utf-8");
-    renameSync(tmpPath, summaryPath);
+    }, null, 2));
     paths.push(summaryPath);
 
     return paths;

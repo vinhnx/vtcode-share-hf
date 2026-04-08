@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join, resolve, basename } from "path";
 import { SessionCollector } from "./session-collector.js";
 import { HFUploader } from "./hf-uploader.js";
 import { ATIFViewer } from "./atif-viewer.js";
 import { TruffleHogScanner } from "./trufflehog-scanner.js";
+import { loadSecrets, loadDenyPatterns } from "./secret-parser.js";
+import { loadWorkspaceFromCollector, resolveWorkspace } from "./workspace-utils.js";
+import { parseColonPaths, listSessionFiles } from "./session-file-utils.js";
 
 const program = new Command();
 
@@ -31,7 +34,7 @@ program
       process.exit(1);
     }
 
-    const workspacePath = resolve(options.cwd, options.workspace);
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
     const collector = new SessionCollector(workspacePath, options.repo, options.organization);
     collector.saveWorkspaceConfig();
 
@@ -56,87 +59,34 @@ program
   .option("--deny-file <path>", "file with deny patterns (one regex per line)")
   .option("--force", "reprocess all sessions")
   .option("--scan", "run trufflehog scan after collection")
-  .action((options) => {
-    const workspacePath = resolve(options.cwd, options.workspace);
+  .action(async (options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const config = await loadWorkspaceFromCollector(workspacePath);
+    if (!config) process.exit(1);
 
-    if (!existsSync(workspacePath)) {
-      console.error(`[ERROR] Workspace not initialized. Run 'vtcode-share-hf init' first.`);
-      process.exit(1);
-    }
+    // Load secrets from all sources
+    const secrets = loadSecrets({
+      envFile: options.envFile,
+      secretFile: options.secretFile,
+      literals: options.secret || [],
+    });
 
-    const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
-    if (!config) {
-      console.error("[ERROR] Cannot read workspace config.");
-      process.exit(1);
-    }
-
-    const secrets: string[] = [];
-
-    if (options.envFile) {
-      try {
-        const content = readFileSync(options.envFile, "utf-8");
-        secrets.push(...content.split("\n").filter((l) => l.trim()));
-      } catch {
-        console.warn(`[WARN] Cannot read env file: ${options.envFile}`);
-      }
-    }
-
-    if (options.secretFile) {
-      try {
-        const content = readFileSync(options.secretFile, "utf-8");
-        secrets.push(...content.split("\n").filter((l) => l.trim()));
-      } catch {
-        console.warn(`[WARN] Cannot read secret file: ${options.secretFile}`);
-      }
-    }
-
-    secrets.push(...(options.secret || []));
-
-    const zshrc = join(process.env.HOME || "", ".zshrc");
-    if (existsSync(zshrc)) {
-      try {
-        const content = readFileSync(zshrc, "utf-8");
-        const envVars = content.match(/export\s+\w+=.*/g) || [];
-        // Filter out common non-secret environment variables
-        const skipKeys = new Set(["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "EDITOR", "PAGER", "SHLVL", "PWD", "OLDPWD", "LOGNAME"]);
-        for (const line of envVars) {
-          const keyMatch = line.match(/export\s+(\w+)=/);
-          if (keyMatch && !skipKeys.has(keyMatch[1])) {
-            secrets.push(line);
-          }
-        }
-      } catch { /* ignore */ }
-    }
+    // Load deny patterns
+    const denyPatterns = loadDenyPatterns({
+      inline: options.deny || [],
+      files: options.denyFile ? [options.denyFile] : [],
+    });
 
     const collector = new SessionCollector(workspacePath, config.repo, config.organization, secrets);
     collector.setForce(options.force || false);
-
-    const denyPatterns: string[] = [];
-    if (options.denyFile) {
-      try {
-        const content = readFileSync(options.denyFile, "utf-8");
-        denyPatterns.push(...content.split("\n").filter((l) => l.trim()));
-      } catch {
-        console.warn(`[WARN] Cannot read deny file: ${options.denyFile}`);
-      }
-    }
-    denyPatterns.push(...(options.deny || []));
     if (denyPatterns.length > 0) {
-      collector.setDenyPatterns(denyPatterns);
+      collector.setDenyPatterns(denyPatterns.map((r) => r.source));
     }
 
-    let sessionDirs: string[];
-    if (options.sessionDirs) {
-      sessionDirs = options.sessionDirs.split(":").map((p: string) => {
-        let path = p.trim();
-        if (path.startsWith("~")) {
-          path = join(process.env.HOME || "", path.slice(1));
-        }
-        return path;
-      }).filter((p: string) => p);
-    } else {
-      sessionDirs = [join(process.env.HOME || "", ".vtcode/sessions")];
-    }
+    // Resolve session directories
+    const sessionDirs = options.sessionDirs
+      ? parseColonPaths(options.sessionDirs)
+      : [join(process.env.HOME || "", ".vtcode/sessions")];
 
     let totalFiles = 0;
     let collected = 0;
@@ -149,10 +99,7 @@ program
         continue;
       }
 
-      const files = readdirSync(sessionsPath).filter((f) =>
-        f.match(/\.(json|jsonl)$/) && !f.startsWith(".")
-      );
-
+      const files = listSessionFiles(sessionsPath);
       console.log(`Found ${files.length} sessions in ${sessionsPath}`);
 
       for (const file of files) {
@@ -197,34 +144,17 @@ program
   .option("--cwd <path>", "working directory", process.cwd())
   .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
   .option("--dry-run", "show what would be uploaded")
-  .action((options) => {
-    const workspacePath = resolve(options.cwd, options.workspace);
-
-    if (!existsSync(workspacePath)) {
-      console.error(`[ERROR] Workspace not found at ${workspacePath}`);
-      process.exit(1);
-    }
-
-    const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
-    if (!config) {
-      console.error("[ERROR] Cannot read workspace config.");
-      process.exit(1);
-    }
+  .action(async (options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const config = await loadWorkspaceFromCollector(workspacePath);
+    if (!config) process.exit(1);
 
     const uploader = new HFUploader(config.repo, workspacePath, config.organization);
-
-    if (!uploader.checkDependencies()) {
-      process.exit(1);
-    }
-
-    if (!uploader.ensureRepo()) {
-      process.exit(1);
-    }
+    if (!uploader.checkDependencies()) process.exit(1);
+    if (!uploader.ensureRepo()) process.exit(1);
 
     const result = uploader.upload(options.dryRun);
-    if (!result.success) {
-      process.exit(1);
-    }
+    if (!result.success) process.exit(1);
   });
 
 program
@@ -234,7 +164,7 @@ program
   .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
   .option("--uploadable", "show only uploadable sessions")
   .action((options) => {
-    const workspacePath = resolve(options.cwd, options.workspace);
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
     const collector = new SessionCollector(workspacePath, "");
     const redactedDir = join(workspacePath, "redacted");
 
@@ -243,13 +173,12 @@ program
       return;
     }
 
-    const files = readdirSync(redactedDir).filter((f) => f.match(/\.(json|jsonl)$/));
-
     if (options.uploadable) {
       const uploadable = collector.getUploadableSessions();
       console.log(`Uploadable (${uploadable.length}):`);
       uploadable.forEach((f) => console.log(`  ${f}`));
     } else {
+      const files = listSessionFiles(redactedDir);
       console.log(`All sessions (${files.length}):`);
       files.forEach((f) => console.log(`  ${f}`));
     }
@@ -368,13 +297,97 @@ program
   });
 
 program
+  .command("grep")
+  .description("Search uploadable sessions")
+  .option("--cwd <path>", "working directory", process.cwd())
+  .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .option("-i, --ignore-case", "case-insensitive search")
+  .argument("<pattern>", "search pattern")
+  .action((pattern, options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const collector = new SessionCollector(workspacePath, "");
+    const redactedDir = join(workspacePath, "redacted");
+
+    if (!existsSync(redactedDir)) {
+      console.log("No sessions.");
+      return;
+    }
+
+    const uploadable = collector.getUploadableSessions();
+    const regex = new RegExp(pattern, options.ignoreCase ? "i" : "");
+
+    console.log(`Searching ${uploadable.length} uploadable sessions for: ${pattern}`);
+
+    let matches = 0;
+    for (const file of uploadable) {
+      const filePath = join(redactedDir, file);
+      try {
+        const content = readFileSync(filePath, "utf-8");
+        if (regex.test(content)) {
+          console.log(`  ${file}`);
+          matches++;
+        }
+      } catch { /* ignore */ }
+    }
+
+    console.log(`\n${matches} sessions matched.`);
+  });
+
+program
+  .command("reject")
+  .description("Mark sessions as never uploadable")
+  .option("--cwd <path>", "working directory", process.cwd())
+  .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .argument("<files...>", "session files to reject")
+  .action((files, options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const collector = new SessionCollector(workspacePath, "");
+
+    for (const file of files) {
+      collector.addRejected(basename(file));
+      console.log(`[REJECTED] ${basename(file)}`);
+    }
+  });
+
+program
+  .command("allow")
+  .description("Remove session from reject list")
+  .option("--cwd <path>", "working directory", process.cwd())
+  .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .argument("<files...>", "session files to allow")
+  .action((files, options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const collector = new SessionCollector(workspacePath, "");
+
+    for (const file of files) {
+      collector.removeRejected(basename(file));
+      console.log(`[ALLOWED] ${basename(file)}`);
+    }
+  });
+
+program
+  .command("card")
+  .description("Upload dataset card (README.md)")
+  .option("--cwd <path>", "working directory", process.cwd())
+  .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .action(async (options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const config = await loadWorkspaceFromCollector(workspacePath);
+    if (!config) process.exit(1);
+
+    const uploader = new HFUploader(config.repo, workspacePath, config.organization);
+    if (!uploader.checkDependencies()) process.exit(1);
+    if (!uploader.uploadDatasetCard()) process.exit(1);
+  });
+
+program
   .command("scan")
   .description("Scan redacted sessions for secrets")
   .option("--cwd <path>", "working directory", process.cwd())
   .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
   .option("--reject", "auto-reject sessions with verified secrets")
   .action((options) => {
-    const workspacePath = resolve(options.cwd, options.workspace);
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
     const scanner = new TruffleHogScanner(workspacePath);
 
     if (!scanner.isAvailable()) {
@@ -388,17 +401,13 @@ program
       process.exit(1);
     }
 
-    const files = readdirSync(redactedDir)
-      .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
-      .map((f) => join(redactedDir, f));
-
+    const files = listSessionFiles(redactedDir).map((f) => join(redactedDir, f));
     if (files.length === 0) {
       console.log("No session files to scan.");
       return;
     }
 
     console.log(`[SCANNING] Running trufflehog on ${files.length} files...`);
-
     const result = scanner.scanFiles(files);
 
     console.log(
@@ -442,19 +451,10 @@ program
   .description("Show workspace upload statistics")
   .option("--cwd <path>", "working directory", process.cwd())
   .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
-  .action((options) => {
-    const workspacePath = resolve(options.cwd, options.workspace);
-
-    if (!existsSync(workspacePath)) {
-      console.error("[ERROR] Workspace not found.");
-      process.exit(1);
-    }
-
-    const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
-    if (!config) {
-      console.error("[ERROR] Cannot read workspace config.");
-      process.exit(1);
-    }
+  .action(async (options) => {
+    const workspacePath = resolveWorkspace(options.cwd, options.workspace);
+    const config = await loadWorkspaceFromCollector(workspacePath);
+    if (!config) process.exit(1);
 
     const uploader = new HFUploader(config.repo, workspacePath, config.organization);
     const stats = uploader.stats();
