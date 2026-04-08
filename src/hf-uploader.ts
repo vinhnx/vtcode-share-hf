@@ -146,8 +146,7 @@ ds = load_dataset("${repoId}")
 
     // Read manifest if exists
     const manifestPath = join(this.workspace, "manifest.jsonl");
-    const localManifestPath = join(this.workspace, "manifest.local.jsonl");
-    let uploadedSessions = new Set<string>();
+    const uploadedSessions = new Set<string>();
 
     if (existsSync(manifestPath)) {
       try {
@@ -246,7 +245,7 @@ ds = load_dataset("${repoId}")
    */
   private updateManifest(files: Set<string>) {
     const manifestPath = join(this.workspace, "manifest.jsonl");
-    let manifest: Array<{
+    const manifest: Array<{
       file: string;
       uploaded_at: string;
     }> = [];
