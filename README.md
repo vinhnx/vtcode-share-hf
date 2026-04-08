@@ -1,8 +1,12 @@
 # vtcode-share-hf
 
-Collect, review, reject, and upload redacted [vtcode](https://github.com/badlogic/vtcode) session traces to a Hugging Face dataset.
+Collect, review, reject, and upload redacted VTCode session traces to a Hugging Face dataset.
 
-**⚠️ Sharing coding agent sessions risks leaking secrets and PII.** Read this README fully before use.
+Warning: Sharing coding agent sessions risks leaking secrets and PII. Read this README fully before use.
+
+## Dataset
+
+The collected sessions are available on Hugging Face: [vinhnx90/vtcode-sessions](https://huggingface.co/datasets/vinhnx90/vtcode-sessions)
 
 ## What it does
 
@@ -16,25 +20,25 @@ Collect, review, reject, and upload redacted [vtcode](https://github.com/badlogi
 
 Every string field in every JSON object is scanned:
 
-- **literal secrets** from `~/.zshrc`, `--env-file`, and `--secret`
-- **common API key and token patterns**: OpenAI, GitHub, AWS, generic `key=secret`
-- **email addresses** and standard auth patterns
+- literal secrets from `~/.zshrc`, `--env-file`, and `--secret`
+- common API key and token patterns: OpenAI, GitHub, AWS, generic `key=secret`
+- email addresses and standard auth patterns
 
 For maximum safety, pass known secrets explicitly with `--secret`.
 
 ## What does NOT get redacted deterministically
 
-- **Non-standard secrets**: custom tokens, internal service credentials
-- **Context-specific PII**: names, references, sensitive project names
-- **Embedded files**: included in session transcripts
+- Non-standard secrets: custom tokens, internal service credentials
+- Context-specific PII: names, references, sensitive project names
+- Embedded files: included in session transcripts
 
 ## Limitations
 
 Redacting coding agent sessions with 100% precision is not solved. This tool:
 
-1. **Targets OSS project sessions** which typically contain little private data
-2. **Uses deterministic redaction** for known patterns (handles most cases)
-3. **Requires manual review** for sensitive projects (check redacted output)
+1. Targets OSS project sessions which typically contain little private data
+2. Uses deterministic redaction for known patterns (handles most cases)
+3. Requires manual review for sensitive projects (check redacted output)
 
 If your vtcode sessions do not involve many custom secrets, the dataset is likely safe after redaction.
 
@@ -115,6 +119,45 @@ vtcode-share-hf upload --dry-run
 # Upload for real
 vtcode-share-hf upload
 ```
+
+## Usage Guide
+
+### Exploring Trajectories
+
+For interactive exploration of uploaded trajectories, use the local ATIF viewer:
+
+```bash
+vtcode-share-hf viewer
+```
+
+This launches a web interface at http://localhost:3000 where you can:
+- Load trajectory JSON files
+- Navigate through agent steps
+- View tool calls and observations
+- Track metrics and performance
+
+### Programmatic Access
+
+Access the dataset programmatically:
+
+```python
+from datasets import load_dataset
+
+# Load the dataset
+ds = load_dataset("vinhnx90/vtcode-sessions")
+
+# Access individual trajectories
+trajectory = ds[0]
+
+# Explore the data structure
+print(trajectory.keys())
+# dict_keys(['metadata', 'started_at', 'ended_at', 'total_messages',
+#            'distinct_tools', 'transcript', 'messages', 'progress'])
+```
+
+### Direct Download
+
+Individual trajectory files can be downloaded from the [dataset files page](https://huggingface.co/datasets/vinhnx90/vtcode-sessions/tree/main).
 
 ## Workspace layout
 
@@ -242,7 +285,7 @@ Generated Hugging Face dataset cards include tags:
 
 This allows discovery via [Hugging Face dataset search](https://huggingface.co/datasets?other=agent-traces).
 
-**Note**: The HuggingFace dataset viewer is disabled for this dataset due to complex nested trajectory structures. For interactive exploration of VTCode trajectories, use the local ATIF viewer:
+Note: The HuggingFace dataset viewer is disabled for this dataset due to complex nested trajectory structures. For interactive exploration of VTCode trajectories, use the local ATIF viewer:
 
 ```bash
 vtcode-share-hf viewer
@@ -250,15 +293,15 @@ vtcode-share-hf viewer
 
 ## Safety considerations
 
-1. **Deterministic redaction catches most cases** but is not 100% reliable
-2. **Manual review recommended** for projects involving:
+1. Deterministic redaction catches most cases but is not 100% reliable
+2. Manual review recommended for projects involving:
     - Financial data
     - Personal credentials
     - Proprietary code or protocols
     - Customer or partner information
-3. **Keep your secrets file secure** – it contains sensitive values
-4. **Use the `reject` command** for any sessions you're unsure about
-5. **Check `reports/` directory** for detailed redaction findings
+3. Keep your secrets file secure – it contains sensitive values
+4. Use the `reject` command for any sessions you're unsure about
+5. Check `reports/` directory for detailed redaction findings
 
 ## Development
 
