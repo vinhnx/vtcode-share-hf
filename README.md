@@ -7,9 +7,10 @@ Collect, review, reject, and upload redacted [vtcode](https://github.com/badlogi
 ## What it does
 
 - `init`: create a workspace for vtcode session collection
-- `collect`: redact sessions from `~/.vtcode/sessions/` 
+- `collect`: redact sessions from `~/.vtcode/sessions/`
 - `upload`: upload approved sessions to a Hugging Face dataset
 - `list`: view sessions in workspace
+- `viewer`: launch ATIF trajectory viewer web interface
 
 ## What gets redacted
 
@@ -48,12 +49,27 @@ bun link
 
 `collect` and `upload` need `hf` CLI:
 
+Install `hf` CLI:
+On macOS and Linux:
+
 ```bash
-pip install "huggingface_hub[cli]"
+curl -LsSf https://hf.co/cli/install.sh | bash
+```
+
+On Windows:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
+```
+
+https://huggingface.co/docs/huggingface_hub/guides/cli#standalone-installer-recommended
+
+```bash
 hf auth login
 ```
 
 When logging in:
+
 - Create a token at https://huggingface.co/settings/tokens with write scope
 - Choose storage method for credentials
 - Do not set `HF_TOKEN` as an environment variable
@@ -122,6 +138,7 @@ vtcode-share-hf init [--cwd /path] --repo user/dataset [--workspace .vtcode-hf]
 ```
 
 Options:
+
 - `--cwd <dir>`: project directory (default: current directory)
 - `--repo <id>`: HF dataset repo (format: `user/dataset`)
 - `--organization <name>`: HF organization namespace
@@ -134,20 +151,25 @@ vtcode-share-hf collect \
   --secret secrets.txt \
   --secret "my-token" \
   --env-file ~/.zshrc \
+  --session-dirs "~/.vtcode/sessions:~/other/sessions" \
   [--force] [--workspace .vtcode-hf]
 ```
 
 Options:
+
 - `--secret <file>|<text>`: literal secret or secret file (repeatable)
 - `--env-file <path>`: environment file to extract secrets from (default: `~/.zshrc`)
+- `--session-dirs <paths>`: colon-separated session directories (default: `~/.vtcode/sessions`)
 - `--force`: reprocess all sessions
 - `--workspace <dir>`: workspace location
 
 Automatically:
-- Reads `~/.vtcode/sessions/*` (vtcode session files)
+
+- Reads from all specified session directories
 - Extracts secrets from `~/.zshrc` export statements
 - Applies deterministic redaction patterns
 - Saves redacted sessions to workspace
+- Supports multiple vtcode projects at once
 
 ### `upload`
 
@@ -156,6 +178,7 @@ vtcode-share-hf upload [--dry-run] [--workspace .vtcode-hf]
 ```
 
 Options:
+
 - `--dry-run`: show what would be uploaded without doing it
 - `--workspace <dir>`: workspace location
 
@@ -168,6 +191,7 @@ vtcode-share-hf list [--uploadable] [--workspace .vtcode-hf]
 ```
 
 Options:
+
 - `--uploadable`: show only uploadable sessions
 - `--workspace <dir>`: workspace location
 
@@ -178,6 +202,20 @@ vtcode-share-hf reject [--workspace .vtcode-hf] <session.json | image.png>
 ```
 
 Adds session to `reject.txt`. Upload will skip rejected sessions.
+
+### `viewer`
+
+```bash
+vtcode-share-hf viewer [--port 3000]
+```
+
+Launch a web-based ATIF trajectory viewer at http://localhost:3000. The viewer provides an interactive interface for exploring ATIF-compliant trajectory files with features like:
+
+- Step-by-step navigation through agent trajectories
+- Tool call visualization
+- Observation display
+- Metrics tracking
+- Raw JSON inspection
 
 ## Verifying results
 
@@ -197,20 +235,27 @@ If you find private content still present, add the keyword/secret to your secret
 ## Dataset card
 
 Generated Hugging Face dataset cards include tags:
+
 - `agent-traces`
 - `coding-agent`
 - `vtcode-share-hf`
 
 This allows discovery via [Hugging Face dataset search](https://huggingface.co/datasets?other=agent-traces).
 
+**Note**: The HuggingFace dataset viewer is disabled for this dataset due to complex nested trajectory structures. For interactive exploration of VTCode trajectories, use the local ATIF viewer:
+
+```bash
+vtcode-share-hf viewer
+```
+
 ## Safety considerations
 
 1. **Deterministic redaction catches most cases** but is not 100% reliable
 2. **Manual review recommended** for projects involving:
-   - Financial data
-   - Personal credentials
-   - Proprietary code or protocols
-   - Customer or partner information
+    - Financial data
+    - Personal credentials
+    - Proprietary code or protocols
+    - Customer or partner information
 3. **Keep your secrets file secure** – it contains sensitive values
 4. **Use the `reject` command** for any sessions you're unsure about
 5. **Check `reports/` directory** for detailed redaction findings
@@ -231,5 +276,7 @@ MIT
 ## See also
 
 - [pi-share-hf](https://github.com/badlogic/pi-share-hf) - similar tool for pi coding agent
-- [vtcode](https://github.com/badlogic/vtcode) - the coding agent this tool works with
+- [VTCode](https://github.com/vinhnx/VTCode) - the coding agent this tool works with
+- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) - Agent Trajectory Interchange Format specification
+- [HuggingFace Documentation](https://huggingface.co/docs) - Official HuggingFace documentation
 - [trufflehog](https://github.com/trufflesecurity/trufflehog) - advanced secret detection (future integration)

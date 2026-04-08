@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATIF Trajectory Viewer</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --accent-color: #4a9eff;
+            --card-bg: #2a2a2a;
+            --border-color: #404040;
+            --success-color: #4ade80;
+            --warning-color: #fbbf24;
+            --error-color: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            color: var(--accent-color);
+            margin-bottom: 10px;
+        }
+
+        .session-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .info-item {
+            background: rgba(74, 158, 255, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 3px solid var(--accent-color);
+        }
+
+        .info-label {
+            font-weight: bold;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .info-value {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .step {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .step-header {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .step-header:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .step-meta {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .step-id {
+            background: var(--accent-color);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .step-source {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .step-source.user {
+            background: #10b981;
+            color: white;
+        }
+
+        .step-source.agent {
+            background: #8b5cf6;
+            color: white;
+        }
+
+        .step-source.system {
+            background: #f59e0b;
+            color: black;
+        }
+
+        .step-time {
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+
+        .step-toggle {
+            font-size: 1.2em;
+            transition: transform 0.2s;
+        }
+
+        .step-content {
+            padding: 0;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .step-content.expanded {
+            padding: 20px;
+            max-height: 2000px;
+        }
+
+        .step-section {
+            margin-bottom: 20px;
+        }
+
+        .step-section h4 {
+            color: var(--accent-color);
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+
+        .message {
+            background: rgba(255, 255, 255, 0.02);
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-color);
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+        }
+
+        .reasoning {
+            background: rgba(251, 191, 36, 0.1);
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 3px solid var(--warning-color);
+            margin-top: 10px;
+        }
+
+        .tool-calls {
+            display: grid;
+            gap: 10px;
+        }
+
+        .tool-call {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+        }
+
+        .tool-call-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .tool-call-id {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            background: rgba(139, 92, 246, 0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .tool-call-function {
+            font-weight: bold;
+            color: #c4b5fd;
+        }
+
+        .tool-arguments {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin-top: 8px;
+        }
+
+        .observation {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+        }
+
+        .observation-result {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .observation-result:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .observation-call-id {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            background: rgba(16, 185, 129, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-bottom: 5px;
+        }
+
+        .metrics {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 6px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .metric {
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .metric-label {
+            font-size: 0.8em;
+            opacity: 0.8;
+            text-transform: uppercase;
+        }
+
+        .cost {
+            color: var(--success-color) !important;
+        }
+
+        .final-metrics {
+            background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid var(--accent-color);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .final-metrics h3 {
+            color: var(--accent-color);
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .json-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .json-viewer {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        .json-content {
+            background: var(--bg-color);
+            padding: 20px;
+            border-radius: 8px;
+            white-space: pre;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+        .json-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: var(--error-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: var(--accent-color);
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .file-input {
+            margin-bottom: 20px;
+        }
+
+        .file-input label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .file-input input {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 10px;
+            border-radius: 4px;
+            width: 100%;
+        }
+
+        @media (max-width: 768px) {
+            .session-info {
+                grid-template-columns: 1fr;
+            }
+
+            .metrics {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .tool-call-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="file-input">
+            <label for="trajectory-file">Load ATIF Trajectory File:</label>
+            <input type="file" id="trajectory-file" accept=".json">
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Loading trajectory...
+        </div>
+
+        <div id="error" class="error" style="display: none;">
+        </div>
+
+        <div id="viewer" style="display: none;">
+            <div class="header">
+                <h1>ATIF Trajectory Viewer</h1>
+                <div id="session-info" class="session-info">
+                    <!-- Session info will be populated here -->
+                </div>
+            </div>
+
+            <div id="steps">
+                <!-- Steps will be populated here -->
+            </div>
+
+            <div id="final-metrics">
+                <!-- Final metrics will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <button class="json-toggle" onclick="toggleJsonView()">View Raw JSON</button>
+
+    <div id="json-viewer" class="json-viewer">
+        <button class="json-close" onclick="toggleJsonView()">Close</button>
+        <div id="json-content" class="json-content">
+            <!-- Raw JSON will be displayed here -->
+        </div>
+    </div>
+
+    <script>
+        let trajectoryData = null;
+
+        document.getElementById('trajectory-file').addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const loading = document.getElementById('loading');
+                const error = document.getElementById('error');
+                const viewer = document.getElementById('viewer');
+
+                loading.style.display = 'block';
+                error.style.display = 'none';
+                viewer.style.display = 'none';
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        trajectoryData = data;
+                        renderTrajectory(data);
+                        loading.style.display = 'none';
+                        viewer.style.display = 'block';
+                    } catch (err) {
+                        loading.style.display = 'none';
+                        error.style.display = 'block';
+                        error.textContent = `Error parsing JSON: ${err.message}`;
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function renderTrajectory(data) {
+            renderSessionInfo(data);
+            renderSteps(data.steps || []);
+            renderFinalMetrics(data.final_metrics);
+
+            // Update raw JSON view
+            document.getElementById('json-content').textContent = JSON.stringify(data, null, 2);
+        }
+
+        function renderSessionInfo(data) {
+            const container = document.getElementById('session-info');
+            container.innerHTML = `
+                <div class="info-item">
+                    <div class="info-label">Schema Version</div>
+                    <div class="info-value">${data.schema_version || 'Unknown'}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Session ID</div>
+                    <div class="info-value">${data.session_id || 'Unknown'}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Agent</div>
+                    <div class="info-value">${data.agent?.name || 'Unknown'} v${data.agent?.version || 'Unknown'}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Model</div>
+                    <div class="info-value">${data.agent?.model_name || 'Unknown'}</div>
+                </div>
+            `;
+        }
+
+        function renderSteps(steps) {
+            const container = document.getElementById('steps');
+            container.innerHTML = '';
+
+            steps.forEach(step => {
+                const stepElement = createStepElement(step);
+                container.appendChild(stepElement);
+            });
+        }
+
+        function createStepElement(step) {
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'step';
+
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'step-header';
+            headerDiv.onclick = () => toggleStep(stepDiv);
+
+            headerDiv.innerHTML = `
+                <div class="step-meta">
+                    <span class="step-id">#${step.step_id}</span>
+                    <span class="step-source ${step.source}">${step.source}</span>
+                    <span class="step-time">${formatTimestamp(step.timestamp)}</span>
+                </div>
+                <span class="step-toggle">▼</span>
+            `;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'step-content';
+
+            if (step.message) {
+                contentDiv.innerHTML += `
+                    <div class="step-section">
+                        <h4>Message</h4>
+                        <div class="message">${escapeHtml(step.message)}</div>
+                    </div>
+                `;
+            }
+
+            if (step.reasoning_content) {
+                contentDiv.innerHTML += `
+                    <div class="step-section">
+                        <h4>Reasoning</h4>
+                        <div class="reasoning">${escapeHtml(step.reasoning_content)}</div>
+                    </div>
+                `;
+            }
+
+            if (step.tool_calls && step.tool_calls.length > 0) {
+                contentDiv.innerHTML += `
+                    <div class="step-section">
+                        <h4>Tool Calls</h4>
+                        <div class="tool-calls">
+                            ${step.tool_calls.map(call => createToolCallElement(call)).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (step.observation) {
+                contentDiv.innerHTML += `
+                    <div class="step-section">
+                        <h4>Observation</h4>
+                        <div class="observation">
+                            ${step.observation.results.map(result => createObservationResultElement(result)).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (step.metrics) {
+                contentDiv.innerHTML += `
+                    <div class="step-section">
+                        <h4>Metrics</h4>
+                        <div class="metrics">
+                            ${createMetricsElement(step.metrics)}
+                        </div>
+                    </div>
+                `;
+            }
+
+            stepDiv.appendChild(headerDiv);
+            stepDiv.appendChild(contentDiv);
+
+            return stepDiv;
+        }
+
+        function createToolCallElement(call) {
+            return `
+                <div class="tool-call">
+                    <div class="tool-call-header">
+                        <span class="tool-call-function">${call.function_name}</span>
+                        <span class="tool-call-id">${call.tool_call_id}</span>
+                    </div>
+                    <div class="tool-arguments">
+                        ${JSON.stringify(call.arguments, null, 2)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function createObservationResultElement(result) {
+            return `
+                <div class="observation-result">
+                    <div class="observation-call-id">${result.source_call_id}</div>
+                    <div>${escapeHtml(result.content)}</div>
+                </div>
+            `;
+        }
+
+        function createMetricsElement(metrics) {
+            const metricsHtml = [];
+
+            if (metrics.prompt_tokens !== undefined) {
+                metricsHtml.push(`<div class="metric"><div class="metric-value">${metrics.prompt_tokens}</div><div class="metric-label">Prompt Tokens</div></div>`);
+            }
+            if (metrics.completion_tokens !== undefined) {
+                metricsHtml.push(`<div class="metric"><div class="metric-value">${metrics.completion_tokens}</div><div class="metric-label">Completion Tokens</div></div>`);
+            }
+            if (metrics.cached_tokens !== undefined) {
+                metricsHtml.push(`<div class="metric"><div class="metric-value">${metrics.cached_tokens}</div><div class="metric-label">Cached Tokens</div></div>`);
+            }
+            if (metrics.cost_usd !== undefined) {
+                metricsHtml.push(`<div class="metric cost"><div class="metric-value">$${metrics.cost_usd.toFixed(4)}</div><div class="metric-label">Cost</div></div>`);
+            }
+
+            return metricsHtml.join('');
+        }
+
+        function renderFinalMetrics(finalMetrics) {
+            if (!finalMetrics) return;
+
+            const container = document.getElementById('final-metrics');
+            container.innerHTML = `
+                <div class="final-metrics">
+                    <h3>Final Metrics</h3>
+                    <div class="metrics">
+                        ${createMetricsElement(finalMetrics)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleStep(stepElement) {
+            const content = stepElement.querySelector('.step-content');
+            const toggle = stepElement.querySelector('.step-toggle');
+
+            content.classList.toggle('expanded');
+            toggle.style.transform = content.classList.contains('expanded') ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+
+        function toggleJsonView() {
+            const viewer = document.getElementById('json-viewer');
+            viewer.style.display = viewer.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString();
+            } catch {
+                return timestamp;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

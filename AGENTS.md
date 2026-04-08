@@ -6,9 +6,10 @@ Development and deployment guide for vtcode-share-hf.
 
 ```bash
 bun run build      # TypeScript compilation
-bun run dev        # Watch mode
-bun run check      # Type check + lint
+bun run dev        # watch mode
+bun run check      # type check + lint
 bun link           # Install CLI globally
+bun run viewer     # Launch ATIF trajectory viewer (recommended for exploring trajectories)
 ```
 
 ## Architecture
@@ -117,6 +118,9 @@ Before uploading:
 ## References
 
 - [pi-share-hf](https://github.com/badlogic/pi-share-hf) - Original tool
+- [VTCode](https://github.com/vinhnx/VTCode) - The coding agent this tool works with
+- [ATIF Protocol](https://harborframework.com/docs/agents/trajectory-format) - Agent Trajectory Interchange Format specification
 - [Commander.js](https://github.com/tj/commander.js) - CLI framework
 - [trufflehog](https://github.com/trufflesecurity/trufflehog) - Secret scanning
 - [HuggingFace Hub](https://github.com/huggingface/huggingface_hub) - Python client
+- [HuggingFace Documentation](https://huggingface.co/docs) - Official HuggingFace documentation

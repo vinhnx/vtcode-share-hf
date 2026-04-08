@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { SessionCollector } from "./session-collector.js";
 import { HFUploader } from "./hf-uploader.js";
+import { ATIFViewer } from "./atif-viewer.js";
 
 const program = new Command();
 
@@ -30,6 +31,14 @@ program
       organization?: string;
       workspace: string;
     }) => {
+      // Validate repo format
+      const repoPattern = /^[^\/]+\/[^\/]+$/;
+      if (!repoPattern.test(options.repo)) {
+        console.error(`[ERROR] Invalid repo format: ${options.repo}`);
+        console.error('  Repo ID must be in the format "user/dataset" or "organization/dataset"');
+        process.exit(1);
+      }
+
       const workspacePath = resolve(options.cwd, options.workspace);
       const collector = new SessionCollector(
         workspacePath,
@@ -57,6 +66,7 @@ program
   .description("Collect and redact vtcode sessions")
   .option("--cwd <path>", "working directory", process.cwd())
   .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .option("--session-dirs <paths>", "colon-separated session directories (default: ~/.vtcode/sessions)")
   .option("--secret <value>", "secret to redact (repeatable)")
   .option("--env-file <path>", "environment file with secrets")
   .option("--force", "reprocess all sessions")
@@ -64,6 +74,7 @@ program
     (options: {
       cwd: string;
       workspace: string;
+      sessionDirs?: string;
       secret?: string | string[];
       envFile?: string;
       force: boolean;
@@ -119,34 +130,55 @@ program
         secrets
       );
 
-      // Find vtcode sessions
-      const sessionsPath = join(process.env.HOME || "", ".vtcode/sessions");
-      if (!existsSync(sessionsPath)) {
-        console.error(`[ERROR] vtcode sessions not found at ${sessionsPath}`);
-        process.exit(1);
+      // Determine session directories
+      let sessionDirs: string[];
+      if (options.sessionDirs) {
+        sessionDirs = options.sessionDirs
+          .split(":")
+          .map((p) => {
+            let path = p.trim();
+            // Expand tilde
+            if (path.startsWith("~")) {
+              path = join(process.env.HOME || "", path.slice(1));
+            }
+            return path;
+          })
+          .filter((p) => p);
+      } else {
+        sessionDirs = [join(process.env.HOME || "", ".vtcode/sessions")];
       }
 
-      const files = readdirSync(sessionsPath).filter((f) =>
-        f.match(/session-vtcode.*\.(json|jsonl)$/)
-      );
-
-      console.log(`Found ${files.length} vtcode sessions`);
-
+      // Collect from all directories
+      let totalFiles = 0;
       let collected = 0;
-      for (const file of files) {
-        const filePath = join(sessionsPath, file);
-        const result = collector.collectSession(filePath);
 
-        if (result.success && result.metadata) {
-          console.log(`[OK] ${file} (${result.metadata.redactions_count} redactions)`);
-          collected++;
-        } else {
-          console.error(`[FAIL] ${file}: ${result.error}`);
+      for (const sessionsPath of sessionDirs) {
+        if (!existsSync(sessionsPath)) {
+          console.warn(`[SKIP] sessions directory not found: ${sessionsPath}`);
+          continue;
+        }
+
+        const files = readdirSync(sessionsPath).filter((f) =>
+          f.match(/\.(json|jsonl)$/) && !f.startsWith(".")
+        );
+
+        console.log(`Found ${files.length} sessions in ${sessionsPath}`);
+
+        for (const file of files) {
+          const filePath = join(sessionsPath, file);
+          const result = collector.collectSession(filePath);
+
+          if (result.success && result.metadata) {
+            collected++;
+          } else {
+            console.error(`[FAIL] ${file}: ${result.error}`);
+          }
+          totalFiles++;
         }
       }
 
       collector.saveWorkspaceConfig();
-      console.log(`\n[DONE] Collected ${collected}/${files.length} sessions`);
+      console.log(`\n[DONE] Collected ${collected}/${totalFiles} sessions`);
     }
   );
 
@@ -221,9 +253,52 @@ program
       files.forEach((file) => {
         console.log(`  ${file}`);
       });
-
-      console.log(`\nTotal: ${files.length} sessions`);
     }
   );
+
+/**
+ * card command: Upload dataset card
+ */
+program
+  .command("card")
+  .description("Upload dataset card (README.md) to Hugging Face dataset")
+  .option("--workspace <dir>", "workspace directory", ".vtcode-hf")
+  .action((options) => {
+    const workspacePath = resolve(process.cwd(), options.workspace);
+
+    if (!existsSync(workspacePath)) {
+      console.error(`[ERROR] Workspace not found at ${workspacePath}`);
+      process.exit(1);
+    }
+
+    const config = new SessionCollector(workspacePath, "").loadWorkspaceConfig();
+    if (!config) {
+      console.error(`[ERROR] Cannot read workspace config.`);
+      process.exit(1);
+    }
+
+    const uploader = new HFUploader(config.repo, workspacePath);
+
+    if (!uploader.checkDependencies()) {
+      process.exit(1);
+    }
+
+    if (!uploader.uploadDatasetCard(config.organization)) {
+      process.exit(1);
+    }
+  });
+
+/**
+ * viewer command: Launch ATIF trajectory viewer
+ */
+program
+  .command("viewer")
+  .description("Launch ATIF Trajectory Viewer web interface")
+  .option("--port <port>", "Port to run the viewer on", "3000")
+  .action((options) => {
+    const port = parseInt(options.port);
+    const viewer = new ATIFViewer(port);
+    viewer.start();
+  });
 
 program.parse(process.argv);
